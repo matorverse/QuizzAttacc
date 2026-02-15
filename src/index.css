@@ -1,0 +1,120 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-cyber-darker text-white font-sans antialiased;
+  }
+}
+
+@layer components {
+  /* Cyber button styles */
+  .btn-primary {
+    @apply px-6 py-3 bg-gradient-to-r from-cyber-blue to-cyber-purple rounded-lg font-semibold text-white
+           hover:shadow-lg hover:shadow-cyber-blue/50 transition-all duration-300
+           active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply px-6 py-3 bg-cyber-dark border-2 border-cyber-blue rounded-lg font-semibold text-cyber-blue
+           hover:bg-cyber-blue/10 transition-all duration-300
+           active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* Card styles */
+  .card {
+    @apply bg-cyber-dark border border-cyber-blue/30 rounded-xl p-6
+           shadow-lg shadow-cyber-blue/10;
+  }
+
+  .card-glow {
+    @apply card animate-glow;
+  }
+
+  /* Input styles */
+  .input {
+    @apply w-full px-4 py-3 bg-cyber-dark border-2 border-cyber-blue/30 rounded-lg
+           text-white placeholder-gray-400 focus:border-cyber-blue focus:outline-none
+           transition-colors duration-200;
+  }
+
+  /* Badge styles */
+  .badge {
+    @apply px-3 py-1 rounded-full text-sm font-medium border;
+  }
+
+  /* Gradient text */
+  .text-gradient {
+    @apply bg-gradient-to-r from-cyber-blue via-cyber-purple to-cyber-pink bg-clip-text text-transparent;
+  }
+
+  /* Glass morphism */
+  .glass {
+    @apply bg-white/5 backdrop-blur-lg border border-white/10;
+  }
+
+  /* Answer button */
+  .answer-btn {
+    @apply w-full p-4 bg-cyber-dark border-2 border-cyber-blue/30 rounded-lg
+           text-left font-medium hover:border-cyber-blue hover:bg-cyber-blue/10
+           transition-all duration-200 active:scale-98
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .answer-btn-selected {
+    @apply border-cyber-blue bg-cyber-blue/20;
+  }
+
+  .answer-btn-correct {
+    @apply border-cyber-green bg-cyber-green/20 animate-pulse-slow;
+  }
+
+  .answer-btn-incorrect {
+    @apply border-cyber-red bg-cyber-red/20;
+  }
+}
+
+@layer utilities {
+  .active\:scale-98:active {
+    transform: scale(0.98);
+  }
+
+  .active\:scale-95:active {
+    transform: scale(0.95);
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0a0e27;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #00d4ff;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #00b8e6;
+}
+
+/* Animations */
+@keyframes confetti {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-100vh) rotate(720deg);
+    opacity: 0;
+  }
+}
+
+.confetti {
+  animation: confetti 3s ease-out forwards;
+}

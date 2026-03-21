@@ -10,12 +10,12 @@ declare global {
     }
 }
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+const envUrl = import.meta.env.VITE_SUPABASE_URL
+const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error('Missing Supabase environment variables')
-}
+// Ensure URL is at least a valid format to prevent createClient from throwing TypeError
+const supabaseUrl = envUrl && envUrl.startsWith('http') ? envUrl : 'http://missing-config.supabase.co'
+const supabaseAnonKey = envKey && envKey !== 'your_supabase_anon_key' ? envKey : 'missing-key'
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
@@ -29,6 +29,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
         },
     },
 })
+
 
 // Database types
 export interface Player {

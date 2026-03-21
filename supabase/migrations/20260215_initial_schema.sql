@@ -84,7 +84,7 @@ CREATE TABLE player_answers (
     match_id UUID NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
     player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
     question_id UUID NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
-    selected_answer_index INTEGER NOT NULL CHECK (selected_answer_index >= 0 AND selected_answer_index <= 3),
+    selected_answer_index INTEGER NOT NULL CHECK (selected_answer_index >= -1 AND selected_answer_index <= 3),
     is_correct BOOLEAN NOT NULL,
     time_taken_ms INTEGER NOT NULL CHECK (time_taken_ms >= 0),
     submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

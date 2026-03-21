@@ -1,5 +1,15 @@
 import { createClient } from '@supabase/supabase-js'
 
+// Add simple type definition for Vite's import.meta.env to satisfy tsc
+declare global {
+    interface ImportMeta {
+        env: {
+            VITE_SUPABASE_URL: string;
+            VITE_SUPABASE_ANON_KEY: string;
+        }
+    }
+}
+
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 

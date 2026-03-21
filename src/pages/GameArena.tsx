@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase, Question, MatchScore } from '../lib/supabase'
-import { loadGameState, saveGameState, getStreakText } from '../lib/gameLogic'
+import { loadGameState, getStreakText } from '../lib/gameLogic'
 import Timer from '../components/Timer'
 import ScoreBoard from '../components/ScoreBoard'
 import ConnectionStatus from '../components/ConnectionStatus'
@@ -13,8 +13,14 @@ export default function GameArena() {
     const [loading, setLoading] = useState(true)
     const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null)
     const [questionOrder, setQuestionOrder] = useState(1)
-    const [totalQuestions, setTotalQuestions] = useState(10)
-    const [timePerQuestion, setTimePerQuestion] = useState(15)
+    const [totalQuestions] = useState(() => {
+        const gs = loadGameState()
+        return gs?.totalQuestions ?? 10
+    })
+    const [timePerQuestion] = useState(() => {
+        const gs = loadGameState()
+        return gs?.timePerQuestion ?? 15
+    })
     const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null)
     const [isCorrect, setIsCorrect] = useState<boolean | null>(null)
     const [correctAnswerIndex, setCorrectAnswerIndex] = useState<number | null>(null)
@@ -27,7 +33,7 @@ export default function GameArena() {
     const [myStreak, setMyStreak] = useState(0)
     const [connectionState, setConnectionState] = useState<'connected' | 'reconnecting' | 'disconnected'>('connected')
 
-    const gameState = loadGameState()
+    const gameState = useMemo(() => loadGameState(), [])
 
     useEffect(() => {
         if (!matchId || !gameState) {
@@ -147,12 +153,12 @@ export default function GameArena() {
         }
     }
 
-    const handleTimeout = () => {
+    const handleTimeout = useCallback(() => {
         if (selectedAnswer === null && !submitting) {
-            // Auto-submit with invalid answer
+            // Auto-submit with timeout indicator (-1)
             handleAnswerSelect(-1)
         }
-    }
+    }, [selectedAnswer, submitting])
 
     if (loading || !currentQuestion) {
         return (
@@ -178,7 +184,7 @@ export default function GameArena() {
 
                 {/* Scoreboard */}
                 <ScoreBoard
-                    player1Name={gameState?.playerId === gameState?.playerId ? 'You' : 'Opponent'}
+                    player1Name="You"
                     player2Name="Opponent"
                     player1Score={myScore}
                     player2Score={opponentScore}
@@ -189,6 +195,7 @@ export default function GameArena() {
                 {/* Timer */}
                 <div className="flex justify-center mb-8">
                     <Timer
+                        key={questionOrder}
                         duration={timePerQuestion}
                         onTimeout={handleTimeout}
                         paused={showFeedback}

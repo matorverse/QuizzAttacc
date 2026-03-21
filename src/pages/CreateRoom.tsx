@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { saveGameState } from '../lib/gameLogic'
@@ -13,7 +13,7 @@ export default function CreateRoom() {
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
     const [roomCode, setRoomCode] = useState('')
-    const [matchId, setMatchId] = useState('')
+    const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
     const [formData, setFormData] = useState({
         displayName: '',
@@ -22,6 +22,16 @@ export default function CreateRoom() {
         questionCount: 10,
         timePerQuestion: 15,
     })
+
+    // Clean up Realtime subscription on unmount
+    useEffect(() => {
+        return () => {
+            if (channelRef.current) {
+                channelRef.current.unsubscribe()
+                channelRef.current = null
+            }
+        }
+    }, [])
 
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -42,7 +52,6 @@ export default function CreateRoom() {
             if (!data.success) throw new Error(data.error)
 
             setRoomCode(data.roomCode)
-            setMatchId(data.matchId)
 
             // Save game state
             saveGameState({
@@ -76,9 +85,7 @@ export default function CreateRoom() {
                 )
                 .subscribe()
 
-            return () => {
-                channel.unsubscribe()
-            }
+            channelRef.current = channel
         } catch (err: any) {
             setError(err.message || 'Failed to create room')
             setLoading(false)
@@ -90,7 +97,7 @@ export default function CreateRoom() {
     }
 
     const shareRoom = async () => {
-        if (navigator.share) {
+        if (typeof navigator.share === 'function') {
             try {
                 await navigator.share({
                     title: 'Join my Quizexe battle!',
@@ -120,7 +127,7 @@ export default function CreateRoom() {
                                     <button onClick={copyRoomCode} className="btn-secondary text-sm">
                                         📋 Copy Code
                                     </button>
-                                    {navigator.share && (
+                                    {typeof navigator.share === 'function' && (
                                         <button onClick={shareRoom} className="btn-secondary text-sm">
                                             📤 Share
                                         </button>

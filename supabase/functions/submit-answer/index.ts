@@ -28,7 +28,7 @@ serve(async (req) => {
             throw new Error('Missing required fields')
         }
 
-        if (selectedAnswerIndex < 0 || selectedAnswerIndex > 3) {
+        if (selectedAnswerIndex < -1 || selectedAnswerIndex > 3) {
             throw new Error('Invalid answer index')
         }
 

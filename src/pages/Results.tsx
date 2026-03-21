@@ -13,8 +13,11 @@ export default function Results() {
     const [isWinner, setIsWinner] = useState(false)
 
     useEffect(() => {
-        loadResults()
-        clearGameState()
+        const init = async () => {
+            await loadResults()
+            clearGameState()
+        }
+        init()
     }, [matchId])
 
     const loadResults = async () => {

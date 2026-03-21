@@ -1,4 +1,4 @@
-# Quizexe - Real-Time 1v1 Quiz Battle Platform
+# QuizzAttacc - Real-Time 1v1 Quiz Battle Platform
 
 <div align="center">
 

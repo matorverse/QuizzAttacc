@@ -4,95 +4,191 @@
 
 @layer base {
   body {
-    @apply bg-cyber-darker text-white font-sans antialiased;
+    background-color: #1C120B;
+    color: #2C1B10;
+    font-family: Lora, Georgia, serif;
+    @apply antialiased;
+    background-image: 
+      radial-gradient(circle at 50% 0%, rgba(212, 175, 55, 0.08) 0%, transparent 60%),
+      radial-gradient(circle at 50% 100%, rgba(42, 26, 16, 0.9) 0%, transparent 80%);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: Cinzel, Georgia, serif;
+    @apply tracking-wide;
   }
 }
 
 @layer components {
-  /* Cyber button styles */
-  .btn-primary {
-    @apply px-6 py-3 bg-gradient-to-r from-cyber-blue to-cyber-purple rounded-lg font-semibold text-white
-           hover:shadow-lg hover:shadow-cyber-blue/50 transition-all duration-300
-           active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed;
+  /* Vintage Engraved Wooden Button Styles */
+  .btn-primary, .btn-wood {
+    font-family: Cinzel, Georgia, serif;
+    background-image: linear-gradient(to bottom, #5A3A23, #3E2718);
+    border: 2px solid rgba(212, 175, 55, 0.6);
+    color: #F3E5AB;
+    box-shadow: 0 4px 0 #2A1A10, inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    @apply px-6 py-3 rounded-xl font-bold tracking-wide
+           transition-all duration-200 active:translate-y-[2px] active:shadow-none
+           disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none;
   }
 
-  .btn-secondary {
-    @apply px-6 py-3 bg-cyber-dark border-2 border-cyber-blue rounded-lg font-semibold text-cyber-blue
-           hover:bg-cyber-blue/10 transition-all duration-300
-           active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed;
+  .btn-primary:hover, .btn-wood:hover {
+    background-image: linear-gradient(to bottom, #5A3A23, #2A1A10);
+    border-color: #D4AF37;
+    color: #FFFFFF;
   }
 
-  /* Card styles */
-  .card {
-    @apply bg-cyber-dark border border-cyber-blue/30 rounded-xl p-6
-           shadow-lg shadow-cyber-blue/10;
+  .btn-secondary, .btn-wood-secondary {
+    font-family: Cinzel, Georgia, serif;
+    background-color: rgba(232, 219, 201, 0.8);
+    border: 2px solid rgba(62, 39, 24, 0.6);
+    color: #2A1A10;
+    @apply px-6 py-3 rounded-xl font-semibold shadow-sm
+           transition-all duration-200 active:translate-y-[2px]
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary:hover, .btn-wood-secondary:hover {
+    background-color: #F5ECE0;
+    border-color: #3E2718;
+    color: #1C120B;
+  }
+
+  /* Parchment Paper Card Styles */
+  .card, .card-parchment {
+    background-color: #F5ECE0;
+    color: #2C1B10;
+    border: 2px solid rgba(216, 199, 176, 0.8);
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+    @apply rounded-2xl p-6 md:p-8 relative overflow-hidden;
   }
 
   .card-glow {
+    border-color: rgba(212, 175, 55, 0.5);
     @apply card animate-glow;
+  }
+
+  /* Wooden Framed Panel */
+  .wood-panel {
+    background-color: #2A1A10;
+    color: #F5ECE0;
+    border: 2px solid rgba(212, 175, 55, 0.4);
+    @apply rounded-2xl p-6 shadow-xl;
   }
 
   /* Input styles */
   .input {
-    @apply w-full px-4 py-3 bg-cyber-dark border-2 border-cyber-blue/30 rounded-lg
-           text-white placeholder-gray-400 focus:border-cyber-blue focus:outline-none
-           transition-colors duration-200;
+    font-family: Lora, Georgia, serif;
+    background-color: rgba(232, 219, 201, 0.6);
+    color: #2C1B10;
+    border: 2px solid #D8C7B0;
+    @apply w-full px-4 py-3 rounded-xl transition-all duration-200 shadow-inner;
   }
 
-  /* Badge styles */
+  .input::placeholder {
+    color: rgba(107, 84, 68, 0.6);
+  }
+
+  .input:focus {
+    border-color: #D4AF37;
+    background-color: #F5ECE0;
+    outline: none;
+  }
+
+  /* Metallic & Wood Badges */
   .badge {
-    @apply px-3 py-1 rounded-full text-sm font-medium border;
+    font-family: Cinzel, Georgia, serif;
+    @apply px-3 py-1 rounded-full text-xs font-semibold border tracking-wider uppercase;
+  }
+
+  .badge-gold {
+    background-color: rgba(42, 26, 16, 0.9);
+    color: #D4AF37;
+    border-color: rgba(212, 175, 55, 0.6);
+    @apply shadow-sm;
+  }
+
+  .badge-wood {
+    background-color: #3E2718;
+    color: #E8DBC9;
+    border-color: #5A3A23;
+    @apply shadow-sm;
   }
 
   /* Gradient text */
-  .text-gradient {
-    @apply bg-gradient-to-r from-cyber-blue via-cyber-purple to-cyber-pink bg-clip-text text-transparent;
+  .text-gradient, .text-gold-gradient {
+    background-image: linear-gradient(to bottom, #F3E5AB, #D4AF37, #AA820A);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    @apply drop-shadow-sm;
   }
 
-  /* Glass morphism */
+  /* Glass morphism with warm tone */
   .glass {
-    @apply bg-white/5 backdrop-blur-lg border border-white/10;
+    background-color: rgba(42, 26, 16, 0.7);
+    color: #F5ECE0;
+    border: 1px solid rgba(212, 175, 55, 0.2);
+    @apply backdrop-blur-md;
   }
 
-  /* Answer button */
+  /* Engraved Wooden Answer Button */
   .answer-btn {
-    @apply w-full p-4 bg-cyber-dark border-2 border-cyber-blue/30 rounded-lg
-           text-left font-medium hover:border-cyber-blue hover:bg-cyber-blue/10
-           transition-all duration-200 active:scale-[0.98]
-           disabled:opacity-50 disabled:cursor-not-allowed;
+    font-family: Lora, Georgia, serif;
+    background-color: #2A1A10;
+    color: #F5ECE0;
+    border: 2px solid rgba(90, 58, 35, 0.6);
+    box-shadow: 0 4px 0 #2A1A10, inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    @apply w-full p-4 rounded-xl
+           text-left font-medium
+           transition-all duration-200 active:scale-[0.99]
+           disabled:cursor-not-allowed;
+  }
+
+  .answer-btn:hover {
+    border-color: #D4AF37;
+    background-color: #3E2718;
   }
 
   .answer-btn-selected {
-    @apply border-cyber-blue bg-cyber-blue/20;
+    background-color: #3E2718;
+    color: #F3E5AB;
+    border-color: #D4AF37;
+    box-shadow: 0 0 20px rgba(212, 175, 55, 0.3);
   }
 
   .answer-btn-correct {
-    @apply border-cyber-green bg-cyber-green/20 animate-pulse-slow;
+    background-color: rgba(45, 106, 55, 0.2);
+    color: #E8F5E9;
+    border-color: #2D6A37;
+    @apply font-semibold animate-pulse-slow;
   }
 
   .answer-btn-incorrect {
-    @apply border-cyber-red bg-cyber-red/20;
+    background-color: rgba(139, 38, 29, 0.2);
+    color: #FFEBEE;
+    border-color: #8B261D;
+    @apply font-semibold;
   }
 }
 
-
-
 /* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #0a0e27;
+  background: #1C120B;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #00d4ff;
-  border-radius: 4px;
+  background: #5A3A23;
+  border: 2px solid #1C120B;
+  border-radius: 5px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #00b8e6;
+  background: #D4AF37;
 }
 
 /* Animations */

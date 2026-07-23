@@ -65,21 +65,23 @@ export default function JoinRoom() {
             <div className="max-w-md w-full">
                 <button
                     onClick={() => navigate('/')}
-                    className="mb-4 text-gray-400 hover:text-white transition-colors flex items-center gap-2"
+                    className="mb-4 text-parchment-muted hover:text-gold transition-colors flex items-center gap-2 font-serif text-sm"
                 >
-                    ← Back
+                    ← Back to Hall
                 </button>
 
-                <div className="card">
-                    <h2 className="text-3xl font-bold mb-6 text-gradient">Join Room</h2>
+                <div className="card-parchment">
+                    <h2 className="text-3xl font-serif font-bold mb-6 text-parchment-text border-b border-parchment-border pb-3">
+                        Join a Duel
+                    </h2>
 
-                    <form onSubmit={handleJoin} className="space-y-4">
+                    <form onSubmit={handleJoin} className="space-y-5">
                         <div>
-                            <label className="block text-sm font-medium mb-2">Your Name</label>
+                            <label className="block text-sm font-serif font-bold text-parchment-text mb-2">Your Display Name</label>
                             <input
                                 type="text"
                                 className="input"
-                                placeholder="Enter your display name"
+                                placeholder="Enter display name"
                                 value={formData.displayName}
                                 onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
                                 minLength={2}
@@ -89,33 +91,33 @@ export default function JoinRoom() {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-2">Room Code</label>
+                            <label className="block text-sm font-serif font-bold text-parchment-text mb-2">6-Character Table Code</label>
                             <input
                                 type="text"
-                                className="input text-center text-2xl font-bold tracking-wider"
+                                className="input text-center text-3xl font-serif font-bold tracking-widest text-wood-dark"
                                 placeholder="XXX-XXX"
                                 value={formData.roomCode}
                                 onChange={handleRoomCodeChange}
                                 maxLength={7}
                                 required
                             />
-                            <p className="text-xs text-gray-400 mt-1">Enter the 6-character code from your opponent</p>
+                            <p className="text-xs text-parchment-muted font-serif mt-1.5">Enter the code provided by the table host</p>
                         </div>
 
                         {error && (
-                            <div className="bg-cyber-red/20 border border-cyber-red text-cyber-red p-3 rounded-lg text-sm">
+                            <div className="bg-burgundy/10 border border-burgundy/40 text-burgundy p-3 rounded-xl text-xs font-serif">
                                 {error}
                             </div>
                         )}
 
                         <button type="submit" className="btn-primary w-full" disabled={loading}>
-                            {loading ? 'Joining...' : 'Join Battle'}
+                            {loading ? 'Entering Table...' : 'Enter Duel'}
                         </button>
                     </form>
 
-                    <div className="mt-6 glass p-4 rounded-lg">
-                        <p className="text-sm text-gray-400 text-center">
-                            💡 <span className="text-white">Tip:</span> The game starts immediately after you join!
+                    <div className="mt-6 bg-wood-dark/90 p-4 rounded-xl text-gold border border-gold/30">
+                        <p className="text-xs font-serif text-center">
+                            💡 <span className="font-bold text-gold-light">Tavern Rule:</span> The quiz battle begins immediately upon entering the table!
                         </p>
                     </div>
                 </div>

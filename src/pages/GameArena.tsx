@@ -13,24 +13,23 @@ export default function GameArena() {
     const [loading, setLoading] = useState(true)
     const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null)
     const [questionOrder, setQuestionOrder] = useState(1)
-    const [totalQuestions] = useState(() => {
-        const gs = loadGameState()
-        return gs?.totalQuestions ?? 10
-    })
-    const [timePerQuestion] = useState(() => {
-        const gs = loadGameState()
-        return gs?.timePerQuestion ?? 15
-    })
+    const [totalQuestions, setTotalQuestions] = useState(10)
+    const [timePerQuestion, setTimePerQuestion] = useState(15)
+
     const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null)
     const [isCorrect, setIsCorrect] = useState<boolean | null>(null)
     const [correctAnswerIndex, setCorrectAnswerIndex] = useState<number | null>(null)
     const [submitting, setSubmitting] = useState(false)
     const [showFeedback, setShowFeedback] = useState(false)
+    const [waitingForOpponent, setWaitingForOpponent] = useState(false)
     const [questionStartTime, setQuestionStartTime] = useState<number>(Date.now())
 
+    const [myPlayerName, setMyPlayerName] = useState('You')
+    const [opponentPlayerName, setOpponentPlayerName] = useState('Opponent')
     const [myScore, setMyScore] = useState(0)
     const [opponentScore, setOpponentScore] = useState(0)
     const [myStreak, setMyStreak] = useState(0)
+    const [opponentStreak, setOpponentStreak] = useState(0)
     const [connectionState, setConnectionState] = useState<'connected' | 'reconnecting' | 'disconnected'>('connected')
 
     const gameState = useMemo(() => loadGameState(), [])
@@ -41,13 +40,158 @@ export default function GameArena() {
             return
         }
 
-        loadQuestion(questionOrder)
-        subscribeToScores()
+        if (gameState.totalQuestions) setTotalQuestions(gameState.totalQuestions)
+        if (gameState.timePerQuestion) setTimePerQuestion(gameState.timePerQuestion)
+
+        let isMounted = true
+
+        const initializeArena = async () => {
+            try {
+                const { data: matchData, error: matchError } = await supabase
+                    .from('matches')
+                    .select('*, rooms(*)')
+                    .eq('id', matchId)
+                    .single()
+
+                if (matchError || !matchData) {
+                    navigate('/')
+                    return
+                }
+
+                if (matchData.status === 'finished') {
+                    navigate(`/results/${matchId}`)
+                    return
+                }
+
+                if (matchData.rooms?.question_count) setTotalQuestions(matchData.rooms.question_count)
+                if (matchData.rooms?.time_per_question) setTimePerQuestion(matchData.rooms.time_per_question)
+
+                const p1Id = matchData.player1_id
+                const p2Id = matchData.player2_id
+
+                if (p1Id || p2Id) {
+                    const playerIds = [p1Id, p2Id].filter(Boolean)
+                    const { data: playersData } = await supabase
+                        .from('players')
+                        .select('id, display_name')
+                        .in('id', playerIds)
+
+                    if (playersData && isMounted) {
+                        const myPlayer = playersData.find((p) => p.id === gameState.playerId)
+                        const oppPlayer = playersData.find((p) => p.id !== gameState.playerId)
+
+                        if (myPlayer) setMyPlayerName(myPlayer.display_name)
+                        if (oppPlayer) setOpponentPlayerName(oppPlayer.display_name)
+                    }
+                }
+
+                const { data: scoresData } = await supabase
+                    .from('match_scores')
+                    .select('*')
+                    .eq('match_id', matchId)
+
+                if (scoresData && isMounted) {
+                    let mScore = 0
+                    let oScore = 0
+                    let mStreak = 0
+                    let oStreak = 0
+
+                    scoresData.forEach((s: MatchScore) => {
+                        if (s.player_id === gameState.playerId) {
+                            mScore += s.total_points
+                            mStreak = s.current_streak
+                        } else {
+                            oScore += s.total_points
+                            oStreak = s.current_streak
+                        }
+                    })
+
+                    setMyScore(mScore)
+                    setOpponentScore(oScore)
+                    setMyStreak(mStreak)
+                    setOpponentStreak(oStreak)
+                }
+
+                const { data: answeredQuestions } = await supabase
+                    .from('player_answers')
+                    .select('question_id')
+                    .eq('match_id', matchId)
+                    .eq('player_id', gameState.playerId)
+
+                let nextOrder = 1
+                if (answeredQuestions && answeredQuestions.length > 0) {
+                    nextOrder = answeredQuestions.length + 1
+                }
+
+                if (nextOrder > (matchData.rooms?.question_count || gameState.totalQuestions || 10)) {
+                    setWaitingForOpponent(true)
+                    setLoading(false)
+                } else {
+                    await loadQuestion(nextOrder)
+                }
+            } catch (err) {
+                console.error('Initialization error:', err)
+            }
+        }
+
+        initializeArena()
+
+        const scoreChannel = supabase
+            .channel(`match_scores:${matchId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'match_scores',
+                    filter: `match_id=eq.${matchId}`,
+                },
+                (payload) => {
+                    const score = payload.new as MatchScore
+                    if (score.player_id === gameState.playerId) {
+                        setMyScore((prev) => prev + score.total_points)
+                        setMyStreak(score.current_streak)
+                    } else {
+                        setOpponentScore((prev) => prev + score.total_points)
+                        setOpponentStreak(score.current_streak)
+                    }
+                }
+            )
+            .subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                    setConnectionState('connected')
+                } else if (status === 'CHANNEL_ERROR') {
+                    setConnectionState('disconnected')
+                }
+            })
+
+        const matchChannel = supabase
+            .channel(`match_status:${matchId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'matches',
+                    filter: `id=eq.${matchId}`,
+                },
+                (payload) => {
+                    if (payload.new.status === 'finished') {
+                        navigate(`/results/${matchId}`)
+                    }
+                }
+            )
+            .subscribe()
+
+        return () => {
+            isMounted = false
+            scoreChannel.unsubscribe()
+            matchChannel.unsubscribe()
+        }
     }, [matchId])
 
     const loadQuestion = async (order: number) => {
         try {
-            // Get match question
             const { data: matchQuestion, error: mqError } = await supabase
                 .from('match_questions')
                 .select('question_id, questions(*)')
@@ -68,40 +212,6 @@ export default function GameArena() {
             setLoading(false)
         } catch (error) {
             console.error('Error loading question:', error)
-        }
-    }
-
-    const subscribeToScores = () => {
-        const channel = supabase
-            .channel(`match_scores:${matchId}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: 'INSERT',
-                    schema: 'public',
-                    table: 'match_scores',
-                    filter: `match_id=eq.${matchId}`,
-                },
-                (payload) => {
-                    const score = payload.new as MatchScore
-                    if (score.player_id === gameState?.playerId) {
-                        setMyScore((prev) => prev + score.total_points)
-                        setMyStreak(score.current_streak)
-                    } else {
-                        setOpponentScore((prev) => prev + score.total_points)
-                    }
-                }
-            )
-            .subscribe((status) => {
-                if (status === 'SUBSCRIBED') {
-                    setConnectionState('connected')
-                } else if (status === 'CHANNEL_ERROR') {
-                    setConnectionState('disconnected')
-                }
-            })
-
-        return () => {
-            channel.unsubscribe()
         }
     }
 
@@ -132,16 +242,16 @@ export default function GameArena() {
             setCorrectAnswerIndex(data.correctAnswerIndex)
             setShowFeedback(true)
 
-            // Wait 2 seconds to show feedback
             setTimeout(() => {
                 if (data.matchComplete) {
                     navigate(`/results/${matchId}`)
                 } else {
-                    // Load next question
                     const nextOrder = questionOrder + 1
                     if (nextOrder <= totalQuestions) {
                         loadQuestion(nextOrder)
                         setSubmitting(false)
+                    } else {
+                        setWaitingForOpponent(true)
                     }
                 }
             }, 2500)
@@ -154,46 +264,79 @@ export default function GameArena() {
     }
 
     const handleTimeout = useCallback(() => {
-        if (selectedAnswer === null && !submitting) {
-            // Auto-submit with timeout indicator (-1)
+        if (selectedAnswer === null && !submitting && !waitingForOpponent) {
             handleAnswerSelect(-1)
         }
-    }, [selectedAnswer, submitting])
+    }, [selectedAnswer, submitting, waitingForOpponent])
 
-    if (loading || !currentQuestion) {
+    if (loading) {
         return (
             <div className="min-h-screen flex items-center justify-center">
                 <div className="text-center">
-                    <div className="w-16 h-16 border-4 border-cyber-blue border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                    <p className="text-gray-400">Loading question...</p>
+                    <div className="w-14 h-14 border-4 border-gold border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                    <p className="font-serif text-parchment-muted">Preparing question scroll...</p>
                 </div>
             </div>
         )
     }
 
+    if (waitingForOpponent) {
+        return (
+            <div className="min-h-screen p-4 md:p-8 flex flex-col items-center justify-center">
+                <div className="max-w-xl w-full">
+                    <div className="flex items-center justify-between mb-6">
+                        <ConnectionStatus state={connectionState} />
+                    </div>
+
+                    <ScoreBoard
+                        player1Name={myPlayerName}
+                        player2Name={opponentPlayerName}
+                        player1Score={myScore}
+                        player2Score={opponentScore}
+                        player1Streak={myStreak}
+                        player2Streak={opponentStreak}
+                    />
+
+                    <div className="wood-panel text-center p-8 mt-6">
+                        <div className="w-14 h-14 border-4 border-gold border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
+                        <h2 className="text-3xl font-serif font-bold mb-3 text-gold-gradient">All Questions Answered!</h2>
+                        <p className="text-parchment-muted font-body mb-4">
+                            You've answered all question scrolls. Waiting for <span className="text-gold-light font-serif font-bold">{opponentPlayerName}</span> to finish...
+                        </p>
+                        <div className="bg-wood-darker p-4 rounded-xl text-xs font-serif text-gold border border-gold/30">
+                            📜 Live scores update in real-time. You will be redirected to victory results automatically!
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )
+    }
+
+    if (!currentQuestion) return null
+
     return (
         <div className="min-h-screen p-4 md:p-8">
             <div className="max-w-4xl mx-auto">
                 {/* Header */}
-                <div className="flex items-center justify-between mb-6">
-                    <div className="text-sm text-gray-400">
-                        Question {questionOrder} of {totalQuestions}
+                <div className="flex items-center justify-between mb-4 font-serif">
+                    <div className="text-xs md:text-sm text-parchment-muted tracking-wider uppercase">
+                        Question Scroll {questionOrder} of {totalQuestions}
                     </div>
                     <ConnectionStatus state={connectionState} />
                 </div>
 
                 {/* Scoreboard */}
                 <ScoreBoard
-                    player1Name="You"
-                    player2Name="Opponent"
+                    player1Name={myPlayerName}
+                    player2Name={opponentPlayerName}
                     player1Score={myScore}
                     player2Score={opponentScore}
                     player1Streak={myStreak}
-                    player2Streak={0}
+                    player2Streak={opponentStreak}
                 />
 
                 {/* Timer */}
-                <div className="flex justify-center mb-8">
+                <div className="flex justify-center mb-6">
                     <Timer
                         key={questionOrder}
                         duration={timePerQuestion}
@@ -202,13 +345,16 @@ export default function GameArena() {
                     />
                 </div>
 
-                {/* Question */}
-                <div className="card mb-6 animate-scale-in">
-                    <h2 className="text-2xl md:text-3xl font-bold mb-6 text-center">
+                {/* Question Scroll Card */}
+                <div className="card-parchment mb-6 animate-scale-in">
+                    <div className="inline-block px-3 py-1 bg-parchment-dark/70 text-parchment-muted rounded-full text-xs font-serif font-semibold tracking-wider uppercase mb-4 border border-parchment-border">
+                        {currentQuestion.topic} • {currentQuestion.difficulty}
+                    </div>
+                    <h2 className="text-2xl md:text-3xl font-serif font-bold mb-8 text-center text-parchment-text leading-snug">
                         {currentQuestion.question_text}
                     </h2>
 
-                    {/* Answers */}
+                    {/* Wooden Option Tile Buttons */}
                     <div className="space-y-3">
                         {currentQuestion.options.map((option, index) => {
                             const isSelected = selectedAnswer === index
@@ -234,32 +380,32 @@ export default function GameArena() {
                                     className={buttonClass}
                                 >
                                     <div className="flex items-center gap-3">
-                                        <div className="w-8 h-8 rounded-full bg-cyber-blue/20 flex items-center justify-center font-bold flex-shrink-0">
+                                        <div className="w-8 h-8 rounded-lg bg-wood-medium border border-gold/40 text-gold flex items-center justify-center font-serif font-bold text-sm flex-shrink-0 shadow-sm">
                                             {String.fromCharCode(65 + index)}
                                         </div>
-                                        <div className="flex-1 text-left">{option}</div>
-                                        {showFeedback && isThisCorrect && <span>✓</span>}
-                                        {showFeedback && isThisWrong && <span>✗</span>}
+                                        <div className="flex-1 text-left font-body">{option}</div>
+                                        {showFeedback && isThisCorrect && <span className="text-forest font-bold">✓</span>}
+                                        {showFeedback && isThisWrong && <span className="text-burgundy font-bold">✗</span>}
                                     </div>
                                 </button>
                             )
                         })}
                     </div>
 
-                    {/* Feedback */}
+                    {/* Feedback Explanation */}
                     {showFeedback && (
                         <div className="mt-6 animate-slide-up">
                             <div
-                                className={`p-4 rounded-lg border-2 ${isCorrect
-                                        ? 'bg-cyber-green/10 border-cyber-green text-cyber-green'
-                                        : 'bg-cyber-red/10 border-cyber-red text-cyber-red'
+                                className={`p-4 rounded-xl border-2 ${isCorrect
+                                        ? 'bg-forest/10 border-forest text-forest'
+                                        : 'bg-burgundy/10 border-burgundy text-burgundy'
                                     }`}
                             >
-                                <div className="font-bold text-lg mb-1">
-                                    {isCorrect ? '✓ Correct!' : '✗ Incorrect'}
+                                <div className="font-serif font-bold text-base mb-1">
+                                    {isCorrect ? '✓ Excellent! Correct Answer.' : '✗ Incorrect Choice'}
                                 </div>
                                 {currentQuestion.explanation && (
-                                    <div className="text-sm text-gray-300">{currentQuestion.explanation}</div>
+                                    <div className="text-xs font-body text-parchment-muted leading-relaxed">{currentQuestion.explanation}</div>
                                 )}
                             </div>
                         </div>
@@ -268,8 +414,8 @@ export default function GameArena() {
 
                 {/* Streak indicator */}
                 {myStreak > 0 && !showFeedback && (
-                    <div className="text-center text-cyber-blue font-bold animate-pulse">
-                        {getStreakText(myStreak)} Streak!
+                    <div className="text-center font-serif text-gold font-bold animate-pulse text-sm">
+                        {getStreakText(myStreak)} Streak Multiplier Active!
                     </div>
                 )}
             </div>

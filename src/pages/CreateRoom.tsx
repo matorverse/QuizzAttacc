@@ -48,7 +48,18 @@ export default function CreateRoom() {
                 body: formData,
             })
 
-            if (functionError) throw functionError
+            if (functionError) {
+                let exactError = functionError.message
+                if (functionError.context && typeof functionError.context.json === 'function') {
+                    try {
+                        const ctx = await functionError.context.blob()
+                        const text = await ctx.text()
+                        const json = JSON.parse(text)
+                        if (json?.error) exactError = json.error
+                    } catch (e) { /* ignore parse error */ }
+                }
+                throw new Error(exactError)
+            }
             if (!data.success) throw new Error(data.error)
 
             setRoomCode(data.roomCode)
@@ -78,7 +89,6 @@ export default function CreateRoom() {
                     },
                     (payload) => {
                         if (payload.new.status === 'active') {
-                            // Player 2 joined, navigate to game
                             navigate(`/game/${data.matchId}`)
                         }
                     }
@@ -100,7 +110,7 @@ export default function CreateRoom() {
         if (typeof navigator.share === 'function') {
             try {
                 await navigator.share({
-                    title: 'Join my Quizexe battle!',
+                    title: 'Join my QuizzAttacc battle!',
                     text: `Room code: ${roomCode}`,
                     url: window.location.origin,
                 })
@@ -114,21 +124,24 @@ export default function CreateRoom() {
         return (
             <div className="min-h-screen flex items-center justify-center p-4">
                 <div className="max-w-md w-full">
-                    <div className="card-glow text-center">
-                        <h2 className="text-3xl font-bold mb-6 text-gradient">Room Created!</h2>
+                    <div className="wood-panel text-center">
+                        <div className="inline-block px-3 py-1 bg-gold/20 text-gold rounded-full text-xs font-serif tracking-widest uppercase mb-2 border border-gold/40">
+                            📜 Table Lobbies 📜
+                        </div>
+                        <h2 className="text-3xl font-serif font-bold mb-6 text-gold-gradient">Table Prepared!</h2>
 
-                        <div className="mb-8">
-                            <p className="text-gray-400 mb-3">Share this code with your opponent:</p>
-                            <div className="bg-cyber-darker p-6 rounded-lg border-2 border-cyber-blue">
-                                <div className="text-5xl font-bold text-cyber-blue tracking-wider mb-4">
+                        <div className="mb-6">
+                            <p className="text-parchment-muted text-sm mb-3">Share this 6-character code with your opponent:</p>
+                            <div className="bg-wood-darker p-6 rounded-xl border-2 border-gold/50 shadow-inner">
+                                <div className="text-4xl md:text-5xl font-serif font-bold text-gold-light tracking-widest mb-4">
                                     {roomCode.slice(0, 3)}-{roomCode.slice(3)}
                                 </div>
                                 <div className="flex gap-2 justify-center">
-                                    <button onClick={copyRoomCode} className="btn-secondary text-sm">
+                                    <button onClick={copyRoomCode} className="btn-wood-secondary text-xs">
                                         📋 Copy Code
                                     </button>
                                     {typeof navigator.share === 'function' && (
-                                        <button onClick={shareRoom} className="btn-secondary text-sm">
+                                        <button onClick={shareRoom} className="btn-wood-secondary text-xs">
                                             📤 Share
                                         </button>
                                     )}
@@ -136,19 +149,19 @@ export default function CreateRoom() {
                             </div>
                         </div>
 
-                        <div className="glass p-4 rounded-lg mb-6">
-                            <div className="flex items-center justify-center gap-2 mb-2">
-                                <div className="w-3 h-3 bg-yellow-400 rounded-full animate-pulse"></div>
-                                <span className="text-yellow-400 font-medium">Waiting for opponent...</span>
+                        <div className="bg-wood-medium/60 p-4 rounded-xl mb-6 border border-gold/30">
+                            <div className="flex items-center justify-center gap-2 mb-1">
+                                <div className="w-3 h-3 bg-gold rounded-full animate-pulse"></div>
+                                <span className="text-gold font-serif font-semibold text-sm">Waiting for opponent to enter...</span>
                             </div>
-                            <p className="text-sm text-gray-400">Game will start automatically when they join</p>
+                            <p className="text-xs text-parchment-muted">The match will start automatically when they join</p>
                         </div>
 
-                        <div className="text-left text-sm text-gray-400 space-y-1">
-                            <p>📚 Topic: <span className="text-white">{formData.topic}</span></p>
-                            <p>⚡ Difficulty: <span className="text-white capitalize">{formData.difficulty}</span></p>
-                            <p>❓ Questions: <span className="text-white">{formData.questionCount}</span></p>
-                            <p>⏱️ Time per question: <span className="text-white">{formData.timePerQuestion}s</span></p>
+                        <div className="text-left text-xs font-serif text-parchment-muted space-y-1.5 bg-wood-darker/60 p-4 rounded-xl border border-wood-light/30">
+                            <p>📚 Topic: <span className="text-parchment font-semibold">{formData.topic}</span></p>
+                            <p>⚡ Difficulty: <span className="text-parchment font-semibold capitalize">{formData.difficulty}</span></p>
+                            <p>❓ Questions: <span className="text-parchment font-semibold">{formData.questionCount}</span></p>
+                            <p>⏱️ Time per question: <span className="text-parchment font-semibold">{formData.timePerQuestion}s</span></p>
                         </div>
                     </div>
                 </div>
@@ -161,21 +174,23 @@ export default function CreateRoom() {
             <div className="max-w-md w-full">
                 <button
                     onClick={() => navigate('/')}
-                    className="mb-4 text-gray-400 hover:text-white transition-colors flex items-center gap-2"
+                    className="mb-4 text-parchment-muted hover:text-gold transition-colors flex items-center gap-2 font-serif text-sm"
                 >
-                    ← Back
+                    ← Back to Hall
                 </button>
 
-                <div className="card">
-                    <h2 className="text-3xl font-bold mb-6 text-gradient">Create Room</h2>
+                <div className="card-parchment">
+                    <h2 className="text-3xl font-serif font-bold mb-6 text-parchment-text border-b border-parchment-border pb-3">
+                        Host a Table
+                    </h2>
 
-                    <form onSubmit={handleCreate} className="space-y-4">
+                    <form onSubmit={handleCreate} className="space-y-5">
                         <div>
-                            <label className="block text-sm font-medium mb-2">Your Name</label>
+                            <label className="block text-sm font-serif font-bold text-parchment-text mb-2">Your Display Name</label>
                             <input
                                 type="text"
                                 className="input"
-                                placeholder="Enter your display name"
+                                placeholder="Enter display name"
                                 value={formData.displayName}
                                 onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
                                 minLength={2}
@@ -185,14 +200,14 @@ export default function CreateRoom() {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-2">Topic</label>
+                            <label className="block text-sm font-serif font-bold text-parchment-text mb-2">Trivia Topic</label>
                             <select
-                                className="input"
+                                className="input cursor-pointer"
                                 value={formData.topic}
                                 onChange={(e) => setFormData({ ...formData, topic: e.target.value })}
                             >
                                 {TOPICS.map((topic) => (
-                                    <option key={topic} value={topic}>
+                                    <option key={topic} value={topic} className="bg-wood-dark text-parchment">
                                         {topic}
                                     </option>
                                 ))}
@@ -200,54 +215,54 @@ export default function CreateRoom() {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-2">Difficulty</label>
+                            <label className="block text-sm font-serif font-bold text-parchment-text mb-2">Difficulty</label>
                             <div className="grid grid-cols-3 gap-2">
                                 {DIFFICULTIES.map((diff) => (
                                     <button
                                         key={diff}
                                         type="button"
                                         onClick={() => setFormData({ ...formData, difficulty: diff })}
-                                        className={`py-2 rounded-lg font-medium transition-all ${formData.difficulty === diff
-                                                ? 'bg-cyber-blue text-white'
-                                                : 'bg-cyber-dark text-gray-400 hover:text-white'
+                                        className={`py-2 px-3 rounded-xl font-serif text-xs font-semibold capitalize transition-all border ${formData.difficulty === diff
+                                                ? 'bg-wood-dark text-gold border-gold shadow-md'
+                                                : 'bg-parchment-dark/60 text-parchment-muted border-parchment-border hover:bg-parchment-dark'
                                             }`}
                                     >
-                                        {diff.charAt(0).toUpperCase() + diff.slice(1)}
+                                        {diff}
                                     </button>
                                 ))}
                             </div>
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-2">Number of Questions</label>
+                            <label className="block text-sm font-serif font-bold text-parchment-text mb-2">Number of Questions</label>
                             <div className="grid grid-cols-3 gap-2">
                                 {QUESTION_COUNTS.map((count) => (
                                     <button
                                         key={count}
                                         type="button"
                                         onClick={() => setFormData({ ...formData, questionCount: count })}
-                                        className={`py-2 rounded-lg font-medium transition-all ${formData.questionCount === count
-                                                ? 'bg-cyber-purple text-white'
-                                                : 'bg-cyber-dark text-gray-400 hover:text-white'
+                                        className={`py-2 px-3 rounded-xl font-serif text-xs font-semibold transition-all border ${formData.questionCount === count
+                                                ? 'bg-wood-dark text-gold border-gold shadow-md'
+                                                : 'bg-parchment-dark/60 text-parchment-muted border-parchment-border hover:bg-parchment-dark'
                                             }`}
                                     >
-                                        {count}
+                                        {count} Questions
                                     </button>
                                 ))}
                             </div>
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-2">Time per Question</label>
+                            <label className="block text-sm font-serif font-bold text-parchment-text mb-2">Time per Question</label>
                             <div className="grid grid-cols-4 gap-2">
                                 {TIME_OPTIONS.map((time) => (
                                     <button
                                         key={time}
                                         type="button"
                                         onClick={() => setFormData({ ...formData, timePerQuestion: time })}
-                                        className={`py-2 rounded-lg font-medium transition-all ${formData.timePerQuestion === time
-                                                ? 'bg-cyber-pink text-white'
-                                                : 'bg-cyber-dark text-gray-400 hover:text-white'
+                                        className={`py-2 rounded-xl font-serif text-xs font-semibold transition-all border ${formData.timePerQuestion === time
+                                                ? 'bg-wood-dark text-gold border-gold shadow-md'
+                                                : 'bg-parchment-dark/60 text-parchment-muted border-parchment-border hover:bg-parchment-dark'
                                             }`}
                                     >
                                         {time}s
@@ -257,13 +272,13 @@ export default function CreateRoom() {
                         </div>
 
                         {error && (
-                            <div className="bg-cyber-red/20 border border-cyber-red text-cyber-red p-3 rounded-lg text-sm">
+                            <div className="bg-burgundy/10 border border-burgundy/40 text-burgundy p-3 rounded-xl text-xs font-serif">
                                 {error}
                             </div>
                         )}
 
                         <button type="submit" className="btn-primary w-full" disabled={loading}>
-                            {loading ? 'Creating...' : 'Create Room'}
+                            {loading ? 'Preparing Table...' : 'Create Table'}
                         </button>
                     </form>
                 </div>

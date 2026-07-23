@@ -12,14 +12,10 @@ serve(async (req) => {
     }
 
     try {
+        // Use service role key for game lobby administration
         const supabaseClient = createClient(
             Deno.env.get('SUPABASE_URL') ?? '',
-            Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-            {
-                global: {
-                    headers: { Authorization: req.headers.get('Authorization')! },
-                },
-            }
+            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '',
         )
 
         const { displayName, roomCode } = await req.json()
@@ -130,8 +126,8 @@ serve(async (req) => {
 
         if (updateError) throw updateError
 
-        // Select random questions based on room settings
-        const { data: questions, error: questionsError } = await supabaseClient
+        // Select questions based on room topic and difficulty, with fallback
+        const { data: exactQuestions, error: questionsError } = await supabaseClient
             .from('questions')
             .select('id')
             .eq('topic', room.topic)
@@ -139,12 +135,46 @@ serve(async (req) => {
 
         if (questionsError) throw questionsError
 
-        if (!questions || questions.length < room.question_count) {
-            throw new Error(`Not enough questions available for ${room.topic} (${room.difficulty})`)
+        let pool = exactQuestions || []
+
+        // Fallback: If not enough exact difficulty matches, pull remaining from same topic
+        if (pool.length < room.question_count) {
+            const { data: topicQuestions } = await supabaseClient
+                .from('questions')
+                .select('id')
+                .eq('topic', room.topic)
+
+            if (topicQuestions && topicQuestions.length > 0) {
+                const existingIds = new Set(pool.map((q) => q.id))
+                const extraQuestions = topicQuestions.filter((q) => !existingIds.has(q.id))
+                pool = [...pool, ...extraQuestions]
+            }
         }
 
-        // Shuffle and select required number of questions
-        const shuffled = questions.sort(() => Math.random() - 0.5)
+        // Final fallback: If still not enough, pull from any topic
+        if (pool.length < room.question_count) {
+            const { data: allQuestions } = await supabaseClient
+                .from('questions')
+                .select('id')
+
+            if (allQuestions && allQuestions.length > 0) {
+                const existingIds = new Set(pool.map((q) => q.id))
+                const extraQuestions = allQuestions.filter((q) => !existingIds.has(q.id))
+                pool = [...pool, ...extraQuestions]
+            }
+        }
+
+        if (pool.length < room.question_count) {
+            throw new Error(`Not enough questions available in database (required ${room.question_count}, found ${pool.length})`)
+        }
+
+        // Fisher-Yates Shuffle for uniform random ordering
+        const shuffled = [...pool]
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1))
+            ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+        }
+
         const selectedQuestions = shuffled.slice(0, room.question_count)
 
         // Insert match_questions with deterministic order

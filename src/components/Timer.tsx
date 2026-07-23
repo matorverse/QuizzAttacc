@@ -34,8 +34,8 @@ export default function Timer({ duration, onTimeout, paused = false }: TimerProp
     const colorClass = getTimerColor(remaining, duration)
 
     return (
-        <div className="relative w-32 h-32">
-            <svg className="transform -rotate-90 w-32 h-32">
+        <div className="relative w-32 h-32 flex items-center justify-center">
+            <svg className="transform -rotate-90 w-32 h-32 drop-shadow-md">
                 <circle
                     cx="64"
                     cy="64"
@@ -43,7 +43,7 @@ export default function Timer({ duration, onTimeout, paused = false }: TimerProp
                     stroke="currentColor"
                     strokeWidth="8"
                     fill="none"
-                    className="text-cyber-dark"
+                    className="text-wood-dark/80"
                 />
                 <circle
                     cx="64"
@@ -59,7 +59,7 @@ export default function Timer({ duration, onTimeout, paused = false }: TimerProp
                 />
             </svg>
             <div className="absolute inset-0 flex items-center justify-center">
-                <span className={`text-4xl font-bold ${colorClass} ${remaining <= 5 ? 'animate-pulse' : ''}`}>
+                <span className={`text-4xl font-serif font-bold ${colorClass} ${remaining <= 5 ? 'animate-pulse' : ''}`}>
                     {formatTime(remaining)}
                 </span>
             </div>

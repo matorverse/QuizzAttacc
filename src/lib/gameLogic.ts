@@ -31,9 +31,9 @@ export const formatTime = (seconds: number): string => {
 
 export const getTimerColor = (remainingSeconds: number, totalSeconds: number): string => {
     const percentage = (remainingSeconds / totalSeconds) * 100
-    if (percentage > 50) return 'text-cyber-green'
-    if (percentage > 25) return 'text-yellow-400'
-    return 'text-cyber-red'
+    if (percentage > 50) return 'text-gold'
+    if (percentage > 25) return 'text-amber-500'
+    return 'text-burgundy-DEFAULT'
 }
 
 // Score formatting
@@ -44,8 +44,8 @@ export const formatScore = (score: number): string => {
 export const getStreakText = (streak: number): string => {
     if (streak === 0) return ''
     if (streak === 1) return '1x'
-    if (streak === 2) return '1.1x 🔥'
-    return '1.3x 🔥🔥'
+    if (streak === 2) return '1.1x 🪙'
+    return '1.3x 🪙🪙'
 }
 
 // Connection state
@@ -54,11 +54,11 @@ export type ConnectionState = 'connected' | 'reconnecting' | 'disconnected'
 export const getConnectionColor = (state: ConnectionState): string => {
     switch (state) {
         case 'connected':
-            return 'bg-cyber-green'
+            return 'bg-forest'
         case 'reconnecting':
-            return 'bg-yellow-400'
+            return 'bg-amber-500'
         case 'disconnected':
-            return 'bg-cyber-red'
+            return 'bg-burgundy'
     }
 }
 
@@ -87,21 +87,21 @@ export const parseRoomCode = (formatted: string): string => {
 // Answer feedback
 export const getAnswerFeedbackClass = (isCorrect: boolean): string => {
     return isCorrect
-        ? 'bg-cyber-green/20 border-cyber-green animate-pulse-slow'
-        : 'bg-cyber-red/20 border-cyber-red animate-pulse-slow'
+        ? 'bg-forest/20 border-forest text-forest animate-pulse-slow'
+        : 'bg-burgundy/20 border-burgundy text-burgundy animate-pulse-slow'
 }
 
 // Difficulty badge colors
 export const getDifficultyColor = (difficulty: string): string => {
     switch (difficulty) {
         case 'easy':
-            return 'bg-cyber-green/20 text-cyber-green border-cyber-green'
+            return 'bg-forest/20 text-forest border-forest/60'
         case 'medium':
-            return 'bg-yellow-400/20 text-yellow-400 border-yellow-400'
+            return 'bg-amber-500/20 text-amber-700 border-amber-500/60'
         case 'hard':
-            return 'bg-cyber-red/20 text-cyber-red border-cyber-red'
+            return 'bg-burgundy/20 text-burgundy border-burgundy/60'
         default:
-            return 'bg-cyber-blue/20 text-cyber-blue border-cyber-blue'
+            return 'bg-gold/20 text-gold-dark border-gold/60'
     }
 }
 

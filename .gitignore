@@ -20,6 +20,10 @@ dist-ssr
 .env.local
 .env.production
 
+# Supabase CLI temp
+supabase/.temp
+
+
 # Logs
 logs
 *.log

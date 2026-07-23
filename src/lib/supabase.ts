@@ -10,12 +10,11 @@ declare global {
     }
 }
 
-const envUrl = import.meta.env.VITE_SUPABASE_URL
-const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+const envUrl = import.meta.env.VITE_SUPABASE_URL || 'https://zssiwfkljhwyzjeawdix.supabase.co'
+const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_DHpnRTVaHb92Xnb9xquwTA_NfLOXCgG'
 
-// Ensure URL is at least a valid format to prevent createClient from throwing TypeError
-const supabaseUrl = envUrl && envUrl.startsWith('http') ? envUrl : 'http://missing-config.supabase.co'
-const supabaseAnonKey = envKey && envKey !== 'your_supabase_anon_key' ? envKey : 'missing-key'
+const supabaseUrl = envUrl && envUrl.startsWith('http') ? envUrl : 'https://zssiwfkljhwyzjeawdix.supabase.co'
+const supabaseAnonKey = envKey && envKey !== 'your_supabase_anon_key' ? envKey : 'sb_publishable_DHpnRTVaHb92Xnb9xquwTA_NfLOXCgG'
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {

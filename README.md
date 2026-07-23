@@ -1,12 +1,19 @@
-# QuizzAttacc - Real-Time 1v1 Quiz Battle Platform
+# ⚔️ QuizzAttacc - 1v1 Old-School Tavern Quiz Duel Platform
 
 <div align="center">
 
-**⚡ Fast • 🎯 Fair • 🔥 Real-Time**
+![React 18](https://img.shields.io/badge/React-18.3.1-blue?style=for-the-badge&logo=react)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.5.3-3178C6?style=for-the-badge&logo=typescript)
+![Supabase](https://img.shields.io/badge/Supabase-Database%20%26%20Edge%20Functions-3ECF8E?style=for-the-badge&logo=supabase)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4.1-38B2AC?style=for-the-badge&logo=tailwind-css)
+![OpenTDB](https://img.shields.io/badge/OpenTDB-870%2B_Questions-FFD700?style=for-the-badge)
+![Vercel](https://img.shields.io/badge/Vercel-Deployed-000000?style=for-the-badge&logo=vercel)
 
-A production-grade, server-authoritative multiplayer quiz game built with Supabase, React, and modern web technologies.
+**📜 Warm Timber Aesthetics • 🪙 Server-Authoritative Logic • ⚡ Real-Time WebSockets**
 
-[Features](#features) • [Architecture](#architecture) • [Setup](#setup) • [Deployment](#deployment)
+A production-grade, zero-trust 1v1 trivia duel platform built with a **Subtle Wooden Old-School Tavern & Board Game** aesthetic, featuring Google Fonts (`Cinzel` & `Lora`), Supabase Realtime, and Open Trivia Database (OpenTDB) integration.
+
+[Features](#-features) • [OpenTDB Integration](#-opentdb-integration) • [Architecture](#-architecture) • [Database Setup](#-database-setup) • [Deployment](#-deployment)
 
 </div>
 
@@ -14,23 +21,34 @@ A production-grade, server-authoritative multiplayer quiz game built with Supaba
 
 ## 🎯 Features
 
-### Core Gameplay
-- **Real-Time 1v1 Battles** - Compete head-to-head with instant score updates
-- **Server-Authoritative Logic** - All scoring and validation happens server-side
-- **Anti-Cheat System** - Time validation, replay protection, and audit logging
-- **Latency Compensation** - 200ms grace period for fair network handling
-- **Streak Multipliers** - Build combos for bonus points (1.0x → 1.1x → 1.3x)
+### 🪵 Aesthetic & UX Design
+- **Subtle Wooden Tavern Theme** — Rich mahogany timber table backdrop (`#1C120B`), aged parchment paper cards (`#F5ECE0`), polished wood tile answer buttons (`#5A3A23`), and metallic brass/gold highlights (`#D4AF37`).
+- **Classic Typography** — **Cinzel** serif headings for game titles and score boards paired with **Lora** literary serif for question reading.
+- **Dynamic Micro-Animations** — Smooth timer countdowns with color stroke transitions, streak multiplier alerts (`🪙`), and live victory scroll summary stats.
 
-### Game Modes
-- **5 Topics**: General Knowledge, Science, History, Pop Culture, Sports
-- **3 Difficulties**: Easy, Medium, Hard
-- **Flexible Settings**: 5/10/15 questions, 10/15/20/30 seconds per question
+### 🛡️ Core Gameplay & Anti-Cheat
+- **Real-Time Duels** — Synchronized question progression and live WebSocket score updates via Supabase Realtime channels.
+- **Server-Authoritative Validation** — All answer scoring, speed bonuses, and streak multipliers are calculated server-side in Deno Edge Functions.
+- **Anti-Cheat Audit Trail** — Submissions track server timestamps and response times (`time_taken_ms`) with a 200ms network latency buffer.
+- **Metallic Streak Multipliers** — Build correct answer streaks for score boosts ($1.0\text{x} \rightarrow 1.1\text{x} \rightarrow 1.3\text{x}$).
 
-### Technical Excellence
-- **Supabase Realtime** - Live score updates and presence tracking
-- **PostgreSQL** - Production-grade database with RLS and triggers
-- **Edge Functions** - Serverless game logic with global deployment
-- **Mobile-First UI** - Cyber-modern design optimized for all devices
+### 📚 Game Customization
+- **5 Topics**: General Knowledge, Science, History, Pop Culture, Sports.
+- **3 Difficulties**: Easy, Medium, Hard.
+- **Flexible Rules**: Choose 5, 10, or 15 questions per match with 10s, 15s, 20s, or 30s question timers.
+
+---
+
+## 🌐 OpenTDB Integration
+
+QuizzAttacc features dual-layer integration with the **Open Trivia Database (OpenTDB)**:
+
+1. **870+ Pre-Seeded SQL Migration** ([`supabase/migrations/2026021601_seed_questions.sql`](supabase/migrations/2026021601_seed_questions.sql)):
+   - Generated via automated fetching script ([`scripts/fetch-opentdb-questions.js`](scripts/fetch-opentdb-questions.js)).
+   - Automatically decodes HTML entities (`&quot;`, `&#039;`, `&amp;`, `&eacute;`) and shuffles answer choices into 4 options.
+2. **Dynamic On-Demand Edge Function Fetcher**:
+   - Built directly into the `join-room` Edge Function.
+   - If a custom room requests questions for a topic/difficulty tier that is under-represented in the database, the Edge Function automatically queries OpenTDB on the fly, saves the questions, and attaches them to the duel!
 
 ---
 
@@ -38,305 +56,93 @@ A production-grade, server-authoritative multiplayer quiz game built with Supaba
 
 ### Tech Stack
 - **Frontend**: React 18 + TypeScript + Vite + Tailwind CSS
-- **Backend**: Supabase (PostgreSQL + Realtime + Edge Functions)
-- **Auth**: Anonymous authentication (instant play)
-- **Deployment**: Vercel (frontend) + Supabase (backend)
+- **Backend**: Supabase (PostgreSQL + Realtime + Deno Edge Functions)
+- **Auth**: Flexible guest sessions with optional Supabase Anonymous Auth
+- **Routing**: React Router DOM v6 + `vercel.json` SPA rewrites
 
 ### Database Schema
 ```
-players → rooms → matches → match_questions → questions
-                    ↓
-            player_answers → match_scores → match_summaries
+players ───► rooms ───► matches ───► match_questions ───► questions
+                           │
+                           ├───► player_answers
+                           ├───► match_scores
+                           └───► match_summaries (Auto-Generated via DB Trigger)
 ```
-
-**Elite Production Features:**
-- ✅ Game state enum (`waiting`, `active`, `finished`, `abandoned`)
-- ✅ Deterministic question ordering (reconnection safety)
-- ✅ Match summary analytics (auto-populated via trigger)
-- ✅ 200ms latency compensation buffer
 
 ### Security Model
 ```
-Client (Sends Intent) → Edge Function (Validates) → Database (Updates) → Realtime (Broadcasts)
+Client (Sends Intent) ──► Serverless Edge Function (Audits & Validates) ──► PostgreSQL (State Write) ──► Realtime Channel (Broadcast)
 ```
-
-**Zero-Trust Principles:**
-- Client NEVER controls scores, time validation, or correct answers
-- Server is the single source of truth
-- All game logic executed server-side
-- Row-level security on all tables
+- **Zero Trust**: Client code never handles correct answer indices or scoring math.
+- **RLS (Row-Level Security)**: Enabled across all 8 database tables.
+- **Automated Summary Trigger**: `generate_match_summary()` automatically computes accuracy and time statistics upon match conclusion.
 
 ---
 
-## 🚀 Setup
+## 🚀 Database Setup
 
 ### Prerequisites
 - Node.js 18+ and npm
-- Supabase account ([supabase.com](https://supabase.com))
-- Git
+- Supabase Account ([supabase.com](https://supabase.com))
 
-### 1. Clone Repository
+### 1. Execute SQL Migrations
+In your Supabase Dashboard (**SQL Editor** $\rightarrow$ **New Query**):
+1. Run [`supabase/migrations/20260216_initial_schema.sql`](supabase/migrations/20260216_initial_schema.sql) (creates tables, enums, triggers, and RLS policies).
+2. Run [`supabase/migrations/2026021601_seed_questions.sql`](supabase/migrations/2026021601_seed_questions.sql) (populates 870 OpenTDB trivia questions).
+
+### 2. Deploy Edge Functions
 ```bash
-git clone <repository-url>
-cd QuizzAttacc
+# Link your project (replace with your project ref)
+npx supabase link --project-ref your-project-ref
+
+# Deploy all 4 serverless edge functions
+npx supabase functions deploy create-room
+npx supabase functions deploy join-room
+npx supabase functions deploy submit-answer
+npx supabase functions deploy cleanup-expired-rooms
 ```
 
-### 2. Install Dependencies
-```bash
-npm install
-```
-
-### 3. Set Up Supabase
-
-#### Create Supabase Project
-1. Go to [supabase.com](https://supabase.com) and create a new project
-2. Wait for database to initialize (~2 minutes)
-
-#### Run Database Migrations
-```bash
-# Install Supabase CLI
-npm install -g supabase
-
-# Link to your project
-supabase link --project-ref your-project-ref
-
-# Run migrations
-supabase db push
-```
-
-Or manually:
-1. Go to Supabase Dashboard → SQL Editor
-2. Copy contents of `supabase/migrations/20260215_initial_schema.sql`
-3. Run the SQL
-4. Copy contents of `supabase/migrations/20260215_seed_questions.sql`
-5. Run the SQL
-
-#### Deploy Edge Functions
-```bash
-# Deploy all functions
-supabase functions deploy create-room
-supabase functions deploy join-room
-supabase functions deploy submit-answer
-supabase functions deploy cleanup-expired-rooms
-
-# Set up cron job for cleanup (Supabase Dashboard → Database → Cron Jobs)
-# Schedule: */15 * * * * (every 15 minutes)
-# Function: cleanup-expired-rooms
-```
-
-### 4. Configure Environment Variables
-
-Create `.env` file:
-```bash
-cp .env.example .env
-```
-
-Edit `.env`:
+### 3. Local Development Configuration
+Create a `.env` file in the project root:
 ```env
 VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
+VITE_SUPABASE_ANON_KEY=your-anon-publishable-key
 ```
 
-Get these values from Supabase Dashboard → Settings → API
-
-### 5. Run Development Server
+### 4. Start Development Server
 ```bash
 npm run dev
 ```
 
-Visit `http://localhost:3000`
-
 ---
 
-## 📦 Deployment
+## 📦 Deployment (Vercel)
 
-### Frontend (Vercel)
+This repository includes a pre-configured [`vercel.json`](vercel.json) file for Single Page Application (SPA) routing.
 
-1. Push code to GitHub
-2. Go to [vercel.com](https://vercel.com) → New Project
-3. Import your repository
-4. Set environment variables:
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`
-5. Deploy
-
-### Backend (Supabase)
-
-Already deployed via Supabase! Just ensure:
-- ✅ Migrations applied
-- ✅ Edge Functions deployed
-- ✅ Cron job configured for cleanup
-
-### Custom Domain (Optional)
-
-**Vercel:**
-- Settings → Domains → Add Domain
-
-**Supabase:**
-- Already uses Supabase's global CDN
+1. Import your GitHub repository into **[vercel.com](https://vercel.com)**.
+2. In **Environment Variables**, add:
+   - `VITE_SUPABASE_URL`: Your Supabase Project URL
+   - `VITE_SUPABASE_ANON_KEY`: Your Supabase Anon Public Key
+3. Click **Deploy**!
 
 ---
 
 ## 🎮 How to Play
 
-### Host a Game
-1. Click "Create Room"
-2. Enter your name and choose settings
-3. Share the 6-character room code with your opponent
-4. Game starts automatically when they join
-
-### Join a Game
-1. Click "Join Room"
-2. Enter your name and the room code
-3. Game starts immediately
-
-### During the Game
-- Answer questions as fast as possible
-- Build streaks for bonus multipliers
-- Watch live scores update in real-time
-- Timer shows remaining time with color transitions
-
-### Scoring Formula
-```
-Base: 100 points (correct answer)
-Time Bonus: 0-50 points (faster = higher)
-Streak Multiplier:
-  - 1st correct: 1.0x
-  - 2nd correct: 1.1x
-  - 3rd+ correct: 1.3x (capped)
-
-Total = (Base + Bonus) × Multiplier
-```
-
-### Win Condition
-- Highest total score wins
-- Tie-breaker: Fastest cumulative answer time
+1. **Host a Table**:
+   - Click **Host a Table**, enter your display name, choose a topic, difficulty, question count, and time limit.
+   - Share the generated **6-character table code** with your opponent.
+2. **Join a Duel**:
+   - Click **Join a Duel**, enter your display name and the table code.
+3. **Battle**:
+   - Answer questions rapidly on carved wooden tiles.
+   - Earn base points ($100$) + speed bonuses (up to $50\text{ pts}$) $\times$ combo multipliers ($1.0\text{x} \rightarrow 1.1\text{x} \rightarrow 1.3\text{x}$).
+4. **Victory Ledger**:
+   - View detailed match statistics, accuracy %, and average response speed on the victory parchment scroll!
 
 ---
 
-## 🔧 Development
+## 📄 License
 
-### Project Structure
-```
-QuizzAttacc/
-├── supabase/
-│   ├── migrations/          # Database schema
-│   └── functions/           # Edge Functions
-├── src/
-│   ├── components/          # Reusable UI components
-│   ├── lib/                 # Utilities and Supabase client
-│   ├── pages/               # Route pages
-│   ├── index.css            # Global styles
-│   └── main.tsx             # App entry point
-├── docs/
-│   └── event-flows.md       # Architecture diagrams
-└── package.json
-```
-
-### Key Files
-- **Database**: `supabase/migrations/20260215_initial_schema.sql`
-- **Questions**: `supabase/migrations/20260215_seed_questions.sql`
-- **Edge Functions**: `supabase/functions/*/index.ts`
-- **Supabase Client**: `src/lib/supabase.ts`
-- **Game Logic**: `src/lib/gameLogic.ts`
-
-### Adding Questions
-
-Edit `supabase/migrations/20260215_seed_questions.sql`:
-```sql
-INSERT INTO questions (topic, difficulty, question_text, options, correct_answer_index, explanation) VALUES
-('Topic', 'difficulty', 'Question text?', 
- '["Option A", "Option B", "Option C", "Option D"]', 2, 
- 'Explanation text');
-```
-
-Then re-run migrations or execute SQL directly.
-
-### Customizing Topics
-
-1. Edit `TOPICS` array in `src/pages/CreateRoom.tsx`
-2. Add corresponding questions to database
-3. Update `docs/event-flows.md` if needed
-
----
-
-## 📊 Scaling Considerations
-
-### Current Capacity
-- ~1,000 concurrent matches (2,000 players)
-- Supabase free tier: 500MB database, 2GB bandwidth/month
-
-### To Scale Beyond
-1. **Database**: Add read replicas for question queries
-2. **Realtime**: Upgrade Supabase plan for more connections
-3. **Edge Functions**: Auto-scale (no action needed)
-4. **CDN**: Add Cloudflare for static assets
-5. **Monitoring**: Add Sentry for errors, PostHog for analytics
-
-### Cost Estimate (1,000 concurrent matches)
-- Supabase Pro: $25/month
-- Vercel Pro: $20/month (optional)
-- **Total**: ~$25-45/month
-
----
-
-## 🔒 Security Features
-
-- ✅ Server-authoritative scoring (no client control)
-- ✅ Time validation with 200ms latency buffer
-- ✅ One answer per question enforcement
-- ✅ Replay protection (timestamp validation)
-- ✅ Rate limiting (5 rooms per hour per player)
-- ✅ Input validation and sanitization
-- ✅ Row-level security policies
-- ✅ Audit logging (all answers recorded)
-
----
-
-## 🐛 Troubleshooting
-
-### "Failed to create room"
-- Check Supabase connection
-- Verify environment variables
-- Check browser console for errors
-
-### "Room not found"
-- Room may have expired (1-hour limit)
-- Verify room code is correct
-- Check if room was deleted
-
-### Realtime not working
-- Verify Supabase Realtime is enabled (Dashboard → Settings → API)
-- Check browser console for WebSocket errors
-- Try refreshing the page
-
-### Questions not loading
-- Verify seed data was inserted
-- Check Supabase logs for errors
-- Ensure RLS policies allow reading questions
-
----
-
-## 📝 License
-
-MIT License - feel free to use this project for learning or commercial purposes.
-
----
-
-## 🙏 Acknowledgments
-
-Built with:
-- [Supabase](https://supabase.com) - Backend infrastructure
-- [React](https://react.dev) - UI framework
-- [Tailwind CSS](https://tailwindcss.com) - Styling
-- [Vite](https://vitejs.dev) - Build tool
-
----
-
-<div align="center">
-
-**Made with ⚡ by the Quizexe Team**
-
-[Report Bug](https://github.com/your-repo/issues) • [Request Feature](https://github.com/your-repo/issues)
-
-</div>
+Distributed under the MIT License. See `LICENSE` for details.

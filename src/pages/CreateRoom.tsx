@@ -39,9 +39,13 @@ export default function CreateRoom() {
         setLoading(true)
 
         try {
-            // Sign in anonymously
-            const { error: authError } = await supabase.auth.signInAnonymously()
-            if (authError) throw authError
+            // Attempt anonymous sign-in (non-blocking fallback for edge function guest handling)
+            try {
+                const { error: authError } = await supabase.auth.signInAnonymously()
+                if (authError) console.warn('Supabase auth note:', authError.message)
+            } catch (e) {
+                console.warn('Auth fallback active')
+            }
 
             // Call Edge Function
             const { data, error: functionError } = await supabase.functions.invoke('create-room', {

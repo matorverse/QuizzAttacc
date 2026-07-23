@@ -13,7 +13,36 @@
 
 A production-grade, zero-trust 1v1 trivia duel platform built with a **Subtle Wooden Old-School Tavern & Board Game** aesthetic, featuring Google Fonts (`Cinzel` & `Lora`), Supabase Realtime, and Open Trivia Database (OpenTDB) integration.
 
-[Features](#-features) • [OpenTDB Integration](#-opentdb-integration) • [Architecture](#-architecture) • [Database Setup](#-database-setup) • [Deployment](#-deployment)
+[Showcase](#%EF%B8%8F-application-showcase) • [Features](#-features) • [OpenTDB Integration](#-opentdb-integration) • [Architecture](#-architecture) • [Database Setup](#-database-setup) • [Deployment](#-deployment)
+
+</div>
+
+---
+
+## 🖼️ Application Showcase
+
+<div align="center">
+
+### 🪵 Tavern Quiz Hall Landing Page
+*Warm mahogany timber table backdrop (`#1C120B`) with gold-embossed Cinzel serif headings & parchment rule scrolls.*
+
+![Tavern Hall Landing Page](docs/screenshots/tavern_hall.png)
+
+<br/>
+
+### 📜 Host Table Setup & Room Code Generation
+*Customizable duel rules ledger (topics, difficulties, question counts, and speed limits) generating a 6-character gold room code.*
+
+| 🛠️ Room Setup Form | 🪙 Table Code Generated |
+| :---: | :---: |
+| <img src="docs/screenshots/host_table.png" width="480" /> | <img src="docs/screenshots/table_code.png" width="480" /> |
+
+<br/>
+
+### ⚔️ Join a Duel
+*Carved parchment entry ledger for guests joining an active trivia table.*
+
+<img src="docs/screenshots/join_duel.png" width="720" />
 
 </div>
 

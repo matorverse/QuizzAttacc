@@ -6,13 +6,87 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+function decodeEntities(text: string) {
+    if (!text) return ''
+    return text
+        .replace(/&quot;/g, '"')
+        .replace(/&#039;/g, "'")
+        .replace(/&apos;/g, "'")
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&deg;/g, '°')
+        .replace(/&eacute;/g, 'é')
+        .replace(/&egrave;/g, 'è')
+        .replace(/&aacute;/g, 'á')
+        .replace(/&ntilde;/g, 'ñ')
+        .replace(/&oacute;/g, 'ó')
+        .replace(/&uuml;/g, 'ü')
+}
+
+const OPENTDB_CATEGORY_IDS: Record<string, number> = {
+    'General Knowledge': 9,
+    'Science': 17,
+    'History': 23,
+    'Pop Culture': 11,
+    'Sports': 21,
+}
+
+async function fetchAndSaveOpenTDBQuestions(supabaseClient: any, topic: string, difficulty: string, amount: number = 15) {
+    const catId = OPENTDB_CATEGORY_IDS[topic] || 9
+    const url = `https://opentdb.com/api.php?amount=${amount}&category=${catId}&difficulty=${difficulty}&type=multiple`
+    try {
+        const res = await fetch(url)
+        if (!res.ok) return []
+        const data = await res.json()
+        if (data.response_code !== 0 || !data.results) return []
+
+        const newQuestions = []
+        for (const item of data.results) {
+            const qText = decodeEntities(item.question).trim()
+            const correctAns = decodeEntities(item.correct_answer).trim()
+            const incorrects = item.incorrect_answers.map((a: string) => decodeEntities(a).trim())
+
+            const options = [correctAns, ...incorrects]
+            for (let i = options.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1))
+                ;[options[i], options[j]] = [options[j], options[i]]
+            }
+
+            const correctIndex = options.indexOf(correctAns)
+
+            newQuestions.push({
+                topic,
+                difficulty,
+                question_text: qText,
+                options,
+                correct_answer_index: correctIndex,
+                explanation: `${correctAns} is the correct answer.`,
+            })
+        }
+
+        if (newQuestions.length > 0) {
+            const { data: inserted, error } = await supabaseClient
+                .from('questions')
+                .insert(newQuestions)
+                .select('id')
+
+            if (!error && inserted) {
+                return inserted
+            }
+        }
+    } catch (e) {
+        console.error('Failed to fetch from OpenTDB:', e)
+    }
+    return []
+}
+
 serve(async (req) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
     }
 
     try {
-        // Use service role key for game lobby administration
         const supabaseClient = createClient(
             Deno.env.get('SUPABASE_URL') ?? '',
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '',
@@ -20,7 +94,6 @@ serve(async (req) => {
 
         const { displayName, roomCode } = await req.json()
 
-        // Validate inputs
         if (!displayName || displayName.length < 2 || displayName.length > 30) {
             throw new Error('Display name must be 2-30 characters')
         }
@@ -31,7 +104,6 @@ serve(async (req) => {
 
         const normalizedCode = roomCode.toUpperCase()
 
-        // Get or create player
         const { data: { user } } = await supabaseClient.auth.getUser()
 
         let playerId: string
@@ -70,7 +142,6 @@ serve(async (req) => {
             playerId = newPlayer.id
         }
 
-        // Find room by code
         const { data: room, error: roomError } = await supabaseClient
             .from('rooms')
             .select('*')
@@ -81,12 +152,10 @@ serve(async (req) => {
             throw new Error('Room not found')
         }
 
-        // Check if room expired
         if (new Date(room.expires_at) < new Date()) {
             throw new Error('Room has expired')
         }
 
-        // Get match for this room
         const { data: match, error: matchError } = await supabaseClient
             .from('matches')
             .select('*')
@@ -97,22 +166,18 @@ serve(async (req) => {
             throw new Error('Match not found')
         }
 
-        // Validate match status
         if (match.status !== 'waiting') {
             throw new Error(`Cannot join: match is ${match.status}`)
         }
 
-        // Check if room is full
         if (match.player2_id) {
             throw new Error('Room is full')
         }
 
-        // Prevent host from joining as guest
         if (match.player1_id === playerId) {
             throw new Error('You are already in this room as host')
         }
 
-        // Add player2 to match and update status to 'active'
         const { data: updatedMatch, error: updateError } = await supabaseClient
             .from('matches')
             .update({
@@ -126,18 +191,26 @@ serve(async (req) => {
 
         if (updateError) throw updateError
 
-        // Select questions based on room topic and difficulty, with fallback
-        const { data: exactQuestions, error: questionsError } = await supabaseClient
+        // Resolve Question Pool with multi-tier fallback + OpenTDB dynamic fetch
+        const { data: exactQuestions } = await supabaseClient
             .from('questions')
             .select('id')
             .eq('topic', room.topic)
             .eq('difficulty', room.difficulty)
 
-        if (questionsError) throw questionsError
-
         let pool = exactQuestions || []
 
-        // Fallback: If not enough exact difficulty matches, pull remaining from same topic
+        // Dynamic OpenTDB Fetch if exact match is insufficient
+        if (pool.length < room.question_count) {
+            const fetched = await fetchAndSaveOpenTDBQuestions(supabaseClient, room.topic, room.difficulty, 15)
+            if (fetched && fetched.length > 0) {
+                const existingIds = new Set(pool.map((q) => q.id))
+                const newItems = fetched.filter((q: any) => !existingIds.has(q.id))
+                pool = [...pool, ...newItems]
+            }
+        }
+
+        // Fallback 2: Same topic
         if (pool.length < room.question_count) {
             const { data: topicQuestions } = await supabaseClient
                 .from('questions')
@@ -151,7 +224,7 @@ serve(async (req) => {
             }
         }
 
-        // Final fallback: If still not enough, pull from any topic
+        // Fallback 3: Any question in database
         if (pool.length < room.question_count) {
             const { data: allQuestions } = await supabaseClient
                 .from('questions')
@@ -165,10 +238,10 @@ serve(async (req) => {
         }
 
         if (pool.length < room.question_count) {
-            throw new Error(`Not enough questions available in database (required ${room.question_count}, found ${pool.length})`)
+            throw new Error(`Not enough questions available (required ${room.question_count}, found ${pool.length})`)
         }
 
-        // Fisher-Yates Shuffle for uniform random ordering
+        // Fisher-Yates Shuffle
         const shuffled = [...pool]
         for (let i = shuffled.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1))
@@ -177,12 +250,11 @@ serve(async (req) => {
 
         const selectedQuestions = shuffled.slice(0, room.question_count)
 
-        // Insert match_questions with deterministic order
         const matchQuestions = selectedQuestions.map((q, index) => ({
             match_id: match.id,
             question_id: q.id,
             question_order: index + 1,
-            started_at: index === 0 ? new Date().toISOString() : null, // Start first question immediately
+            started_at: index === 0 ? new Date().toISOString() : null,
         }))
 
         const { error: insertQuestionsError } = await supabaseClient
@@ -191,7 +263,6 @@ serve(async (req) => {
 
         if (insertQuestionsError) throw insertQuestionsError
 
-        // Get first question details
         const { data: firstQuestion, error: firstQuestionError } = await supabaseClient
             .from('questions')
             .select('*')
@@ -200,39 +271,37 @@ serve(async (req) => {
 
         if (firstQuestionError) throw firstQuestionError
 
+        const { data: player1Data } = await supabaseClient
+            .from('players')
+            .select('id, display_name')
+            .eq('id', match.player1_id)
+            .single()
+
         return new Response(
             JSON.stringify({
                 success: true,
                 matchId: match.id,
-                playerId,
+                playerId: playerId,
+                opponent: {
+                    id: match.player1_id,
+                    displayName: player1Data?.display_name || 'Host',
+                },
                 roomSettings: {
                     topic: room.topic,
                     difficulty: room.difficulty,
                     questionCount: room.question_count,
                     timePerQuestion: room.time_per_question,
                 },
-                firstQuestion: {
-                    id: firstQuestion.id,
-                    questionText: firstQuestion.question_text,
-                    options: firstQuestion.options,
-                    order: 1,
-                    totalQuestions: room.question_count,
-                },
-                opponent: {
-                    id: match.player1_id,
-                },
+                firstQuestion: firstQuestion,
             }),
             {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
             }
         )
-    } catch (error) {
+    } catch (error: any) {
         return new Response(
-            JSON.stringify({
-                success: false,
-                error: error.message,
-            }),
+            JSON.stringify({ success: false, error: error.message }),
             {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 400,

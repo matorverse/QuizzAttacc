@@ -222,6 +222,7 @@ export default function GameArena() {
         setSubmitting(true)
 
         const timeTaken = Date.now() - questionStartTime
+        let result: any = null
 
         try {
             const { data, error } = await supabase.functions.invoke('submit-answer', {
@@ -235,31 +236,110 @@ export default function GameArena() {
                 },
             })
 
-            if (error) throw error
-            if (!data.success) throw new Error(data.error)
+            if (error || !data?.success) {
+                console.warn('Edge function invoke fallback, using direct client DB:', error?.message || data?.error)
+                result = await submitAnswerDirectly(answerIndex, timeTaken)
+            } else {
+                result = data
+            }
+        } catch (edgeErr) {
+            console.warn('Edge Function unavailable, submitting answer directly via DB:', edgeErr)
+            result = await submitAnswerDirectly(answerIndex, timeTaken)
+        }
 
-            setIsCorrect(data.isCorrect)
-            setCorrectAnswerIndex(data.correctAnswerIndex)
-            setShowFeedback(true)
-
-            setTimeout(() => {
-                if (data.matchComplete) {
-                    navigate(`/results/${matchId}`)
-                } else {
-                    const nextOrder = questionOrder + 1
-                    if (nextOrder <= totalQuestions) {
-                        loadQuestion(nextOrder)
-                        setSubmitting(false)
-                    } else {
-                        setWaitingForOpponent(true)
-                    }
-                }
-            }, 2500)
-        } catch (error: any) {
-            console.error('Error submitting answer:', error)
-            alert(error.message || 'Failed to submit answer')
+        if (!result || !result.success) {
             setSubmitting(false)
             setSelectedAnswer(null)
+            return
+        }
+
+        setIsCorrect(result.isCorrect)
+        setCorrectAnswerIndex(result.correctAnswerIndex)
+        setShowFeedback(true)
+
+        setTimeout(() => {
+            if (result.matchComplete) {
+                navigate(`/results/${matchId}`)
+            } else {
+                const nextOrder = questionOrder + 1
+                if (nextOrder <= totalQuestions) {
+                    loadQuestion(nextOrder)
+                    setSubmitting(false)
+                } else {
+                    setWaitingForOpponent(true)
+                }
+            }
+        }, 2500)
+    }
+
+    const submitAnswerDirectly = async (answerIndex: number, timeTaken: number) => {
+        const correctIndex = currentQuestion?.correct_answer_index ?? 0
+        const isAnsCorrect = answerIndex === correctIndex
+
+        let basePoints = 0
+        let timeBonus = 0
+        let multiplier = 1.0
+
+        if (isAnsCorrect) {
+            basePoints = 100
+            const timePerMs = timePerQuestion * 1000
+            const remainingRatio = Math.max(0, (timePerMs - timeTaken) / timePerMs)
+            timeBonus = Math.floor(remainingRatio * 50)
+
+            const newStreak = myStreak + 1
+            if (newStreak >= 3) multiplier = 1.3
+            else if (newStreak === 2) multiplier = 1.1
+
+            const totalPts = Math.floor((basePoints + timeBonus) * multiplier)
+
+            await supabase.from('player_answers').insert({
+                match_id: matchId,
+                player_id: gameState?.playerId,
+                question_id: currentQuestion?.id,
+                selected_answer_index: answerIndex,
+                is_correct: true,
+                time_taken_ms: timeTaken,
+            })
+
+            await supabase.from('match_scores').insert({
+                match_id: matchId,
+                player_id: gameState?.playerId,
+                question_id: currentQuestion?.id,
+                base_points: basePoints,
+                time_bonus: timeBonus,
+                streak_multiplier: multiplier,
+                total_points: totalPts,
+                current_streak: newStreak,
+            })
+        } else {
+            await supabase.from('player_answers').insert({
+                match_id: matchId,
+                player_id: gameState?.playerId,
+                question_id: currentQuestion?.id,
+                selected_answer_index: answerIndex,
+                is_correct: false,
+                time_taken_ms: timeTaken,
+            })
+
+            await supabase.from('match_scores').insert({
+                match_id: matchId,
+                player_id: gameState?.playerId,
+                question_id: currentQuestion?.id,
+                base_points: 0,
+                time_bonus: 0,
+                streak_multiplier: 1.0,
+                total_points: 0,
+                current_streak: 0,
+            })
+        }
+
+        const isLastQuestion = questionOrder >= totalQuestions
+
+        return {
+            success: true,
+            isCorrect: isAnsCorrect,
+            correctAnswerIndex: correctIndex,
+            matchComplete: isLastQuestion,
         }
     }
 

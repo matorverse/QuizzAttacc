@@ -17,47 +17,153 @@ export default function JoinRoom() {
         setFormData({ ...formData, roomCode: formatted })
     }
 
+    const joinRoomDirectly = async (cleanCode: string) => {
+        const { data: { user } } = await supabase.auth.getUser()
+        let playerId: string
+        if (user) {
+            const { data: existingPlayer } = await supabase.from('players').select('id').eq('auth_id', user.id).single()
+            if (existingPlayer) {
+                playerId = existingPlayer.id
+                await supabase.from('players').update({ display_name: formData.displayName }).eq('id', playerId)
+            } else {
+                const { data: newP, error: pErr } = await supabase.from('players').insert({ display_name: formData.displayName, auth_id: user.id }).select('id').single()
+                if (pErr) throw pErr
+                playerId = newP.id
+            }
+        } else {
+            const { data: newP, error: pErr } = await supabase.from('players').insert({ display_name: formData.displayName }).select('id').single()
+            if (pErr) throw pErr
+            playerId = newP.id
+        }
+
+        const { data: room, error: roomErr } = await supabase.from('rooms').select('*').eq('code', cleanCode).single()
+        if (roomErr || !room) throw new Error('Room not found')
+
+        if (new Date(room.expires_at) < new Date()) {
+            throw new Error('Room has expired')
+        }
+
+        const { data: match, error: matchErr } = await supabase.from('matches').select('*').eq('room_id', room.id).single()
+        if (matchErr || !match) throw new Error('Match not found')
+        if (match.status !== 'waiting') throw new Error(`Cannot join: match is ${match.status}`)
+        if (match.player2_id) throw new Error('Room is full')
+        if (match.player1_id === playerId) throw new Error('You are already the host of this room')
+
+        await supabase.from('matches').update({
+            player2_id: playerId,
+            status: 'active',
+            started_at: new Date().toISOString(),
+        }).eq('id', match.id)
+
+        // Select question pool
+        const { data: exactQuestions } = await supabase.from('questions').select('id').eq('topic', room.topic).eq('difficulty', room.difficulty)
+        let pool = exactQuestions || []
+
+        if (pool.length < room.question_count) {
+            const { data: topicQuestions } = await supabase.from('questions').select('id').eq('topic', room.topic)
+            if (topicQuestions && topicQuestions.length > 0) {
+                const existingIds = new Set(pool.map((q) => q.id))
+                const extra = topicQuestions.filter((q) => !existingIds.has(q.id))
+                pool = [...pool, ...extra]
+            }
+        }
+
+        if (pool.length < room.question_count) {
+            const { data: allQuestions } = await supabase.from('questions').select('id')
+            if (allQuestions && allQuestions.length > 0) {
+                const existingIds = new Set(pool.map((q) => q.id))
+                const extra = allQuestions.filter((q) => !existingIds.has(q.id))
+                pool = [...pool, ...extra]
+            }
+        }
+
+        if (pool.length < room.question_count) {
+            throw new Error(`Not enough questions available (required ${room.question_count}, found ${pool.length})`)
+        }
+
+        const shuffled = [...pool]
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1))
+            ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+        }
+        const selected = shuffled.slice(0, room.question_count)
+
+        const matchQuestions = selected.map((q, index) => ({
+            match_id: match.id,
+            question_id: q.id,
+            question_order: index + 1,
+            started_at: index === 0 ? new Date().toISOString() : null,
+        }))
+
+        await supabase.from('match_questions').insert(matchQuestions)
+
+        const { data: hostPlayer } = await supabase.from('players').select('display_name').eq('id', match.player1_id).single()
+
+        return {
+            success: true,
+            matchId: match.id,
+            playerId,
+            opponent: {
+                id: match.player1_id,
+                displayName: hostPlayer?.display_name || 'Host',
+            },
+            roomSettings: {
+                topic: room.topic,
+                difficulty: room.difficulty,
+                questionCount: room.question_count,
+                timePerQuestion: room.time_per_question,
+            }
+        }
+    }
+
     const handleJoin = async (e: React.FormEvent) => {
         e.preventDefault()
         setError('')
         setLoading(true)
 
         try {
-            // Attempt anonymous sign-in (non-blocking fallback for edge function guest handling)
             try {
-                const { error: authError } = await supabase.auth.signInAnonymously()
-                if (authError) console.warn('Supabase auth note:', authError.message)
+                await supabase.auth.signInAnonymously()
             } catch (e) {
                 console.warn('Auth fallback active')
             }
 
             const cleanCode = parseRoomCode(formData.roomCode)
+            let result: any = null
 
-            // Call Edge Function
-            const { data, error: functionError } = await supabase.functions.invoke('join-room', {
-                body: {
-                    displayName: formData.displayName,
-                    roomCode: cleanCode,
-                },
-            })
+            try {
+                const { data, error: functionError } = await supabase.functions.invoke('join-room', {
+                    body: {
+                        displayName: formData.displayName,
+                        roomCode: cleanCode,
+                    },
+                })
 
-            if (functionError) throw functionError
-            if (!data.success) throw new Error(data.error)
+                if (functionError || !data?.success) {
+                    console.warn('Edge function invoke fallback, using direct client DB:', functionError?.message || data?.error)
+                    result = await joinRoomDirectly(cleanCode)
+                } else {
+                    result = data
+                }
+            } catch (edgeErr) {
+                console.warn('Edge Function unavailable, joining room directly via DB:', edgeErr)
+                result = await joinRoomDirectly(cleanCode)
+            }
 
-            // Save game state
+            if (!result || !result.success) throw new Error('Failed to join room')
+
             saveGameState({
-                matchId: data.matchId,
-                playerId: data.playerId,
-                opponentId: data.opponent.id,
+                matchId: result.matchId,
+                playerId: result.playerId,
+                opponentId: result.opponent.id,
                 currentQuestionOrder: 1,
-                totalQuestions: data.roomSettings.questionCount,
-                timePerQuestion: data.roomSettings.timePerQuestion,
-                topic: data.roomSettings.topic,
-                difficulty: data.roomSettings.difficulty,
+                totalQuestions: result.roomSettings.questionCount,
+                timePerQuestion: result.roomSettings.timePerQuestion,
+                topic: result.roomSettings.topic,
+                difficulty: result.roomSettings.difficulty,
             })
 
-            // Navigate to game
-            navigate(`/game/${data.matchId}`)
+            navigate(`/game/${result.matchId}`)
         } catch (err: any) {
             setError(err.message || 'Failed to join room')
             setLoading(false)

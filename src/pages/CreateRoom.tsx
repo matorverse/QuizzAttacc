@@ -148,6 +148,20 @@ export default function CreateRoom() {
                 .subscribe()
 
             channelRef.current = channel
+
+            // Polling fallback every 1.5s in case Realtime WebSocket publication isn't enabled
+            const pollInterval = setInterval(async () => {
+                const { data: checkMatch } = await supabase
+                    .from('matches')
+                    .select('status')
+                    .eq('id', result.matchId)
+                    .single()
+
+                if (checkMatch && checkMatch.status === 'active') {
+                    clearInterval(pollInterval)
+                    navigate(`/game/${result.matchId}`)
+                }
+            }, 1500)
         } catch (err: any) {
             setError(err.message || 'Failed to create room')
             setLoading(false)

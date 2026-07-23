@@ -355,3 +355,11 @@ COMMENT ON COLUMN matches.status IS 'Game state: waiting, active, finished, aban
 COMMENT ON COLUMN match_questions.question_order IS 'Deterministic sequence for reconnection safety';
 COMMENT ON COLUMN match_scores.streak_multiplier IS 'Capped at 1.3x (3+ correct streak)';
 COMMENT ON COLUMN match_summaries.winner_id IS 'Tie-breaker: fastest cumulative time';
+
+-- ============================================================================
+-- SUPABASE REALTIME REPLICATION
+-- ============================================================================
+
+-- Enable Realtime WebSockets broadcasting for matches and match_scores
+ALTER PUBLICATION supabase_realtime ADD TABLE matches;
+ALTER PUBLICATION supabase_realtime ADD TABLE match_scores;

@@ -280,67 +280,57 @@ ALTER TABLE player_answers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE match_scores ENABLE ROW LEVEL SECURITY;
 ALTER TABLE match_summaries ENABLE ROW LEVEL SECURITY;
 
--- Players: Can read own profile, anyone can create
-CREATE POLICY "Players can read own profile" ON players
-    FOR SELECT USING (auth.uid() = auth_id);
+-- Players: Anyone can read, create, and update profiles
+CREATE POLICY "Anyone can read players" ON players
+    FOR SELECT USING (true);
 
 CREATE POLICY "Anyone can create player" ON players
     FOR INSERT WITH CHECK (true);
 
-CREATE POLICY "Players can update own profile" ON players
-    FOR UPDATE USING (auth.uid() = auth_id);
+CREATE POLICY "Anyone can update player" ON players
+    FOR UPDATE USING (true);
 
--- Rooms: Public read, authenticated create
+-- Rooms: Public read and create
 CREATE POLICY "Anyone can read rooms" ON rooms
     FOR SELECT USING (true);
 
-CREATE POLICY "Authenticated users can create rooms" ON rooms
-    FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Anyone can create rooms" ON rooms
+    FOR INSERT WITH CHECK (true);
 
--- Matches: Participants can read
-CREATE POLICY "Match participants can read" ON matches
-    FOR SELECT USING (
-        player1_id IN (SELECT id FROM players WHERE auth_id = auth.uid())
-        OR player2_id IN (SELECT id FROM players WHERE auth_id = auth.uid())
-    );
+-- Matches: Public read, create, and update
+CREATE POLICY "Anyone can read matches" ON matches
+    FOR SELECT USING (true);
 
-CREATE POLICY "Authenticated users can create matches" ON matches
-    FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Anyone can create matches" ON matches
+    FOR INSERT WITH CHECK (true);
+
+CREATE POLICY "Anyone can update matches" ON matches
+    FOR UPDATE USING (true);
 
 -- Questions: Public read (needed for game)
 CREATE POLICY "Anyone can read questions" ON questions
     FOR SELECT USING (true);
 
--- Match questions: Participants can read
-CREATE POLICY "Match participants can read match questions" ON match_questions
-    FOR SELECT USING (
-        match_id IN (
-            SELECT id FROM matches 
-            WHERE player1_id IN (SELECT id FROM players WHERE auth_id = auth.uid())
-               OR player2_id IN (SELECT id FROM players WHERE auth_id = auth.uid())
-        )
-    );
+-- Match questions: Public read and insert
+CREATE POLICY "Anyone can read match questions" ON match_questions
+    FOR SELECT USING (true);
 
--- Player answers: Players can read own answers
-CREATE POLICY "Players can read own answers" ON player_answers
-    FOR SELECT USING (
-        player_id IN (SELECT id FROM players WHERE auth_id = auth.uid())
-    );
+CREATE POLICY "Anyone can insert match questions" ON match_questions
+    FOR INSERT WITH CHECK (true);
 
-CREATE POLICY "Players can insert own answers" ON player_answers
-    FOR INSERT WITH CHECK (
-        player_id IN (SELECT id FROM players WHERE auth_id = auth.uid())
-    );
+-- Player answers: Public read and insert
+CREATE POLICY "Anyone can read player answers" ON player_answers
+    FOR SELECT USING (true);
 
--- Match scores: Participants can read
-CREATE POLICY "Match participants can read scores" ON match_scores
-    FOR SELECT USING (
-        match_id IN (
-            SELECT id FROM matches 
-            WHERE player1_id IN (SELECT id FROM players WHERE auth_id = auth.uid())
-               OR player2_id IN (SELECT id FROM players WHERE auth_id = auth.uid())
-        )
-    );
+CREATE POLICY "Anyone can insert player answers" ON player_answers
+    FOR INSERT WITH CHECK (true);
+
+-- Match scores: Public read and insert
+CREATE POLICY "Anyone can read match scores" ON match_scores
+    FOR SELECT USING (true);
+
+CREATE POLICY "Anyone can insert match scores" ON match_scores
+    FOR INSERT WITH CHECK (true);
 
 -- Match summaries: Public read (for leaderboards)
 CREATE POLICY "Anyone can read match summaries" ON match_summaries

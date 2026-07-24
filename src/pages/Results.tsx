@@ -156,7 +156,11 @@ export default function Results() {
                 if (savedState) {
                     try {
                         const state = JSON.parse(savedState)
-                        setIsWinner(summaryData.winner_id === state.playerId)
+                        const winner = summaryData.winner_id === state.playerId
+                        setIsWinner(winner)
+                        if (winner) {
+                            import('../lib/audio').then((m) => m.playVictory()).catch(() => {})
+                        }
                     } catch {
                         // ignore parse error
                     }
@@ -166,6 +170,38 @@ export default function Results() {
             console.error('Error loading results:', error)
         } finally {
             setLoading(false)
+        }
+    }
+
+    const handleRematch = () => {
+        try {
+            const savedStateStr = localStorage.getItem('quizexe_game_state')
+            let topic = 'General Knowledge'
+            let difficulty = 'medium'
+            let questionCount = 10
+            let timePerQuestion = 15
+
+            if (savedStateStr) {
+                try {
+                    const st = JSON.parse(savedStateStr)
+                    if (st.topic) topic = st.topic
+                    if (st.difficulty) difficulty = st.difficulty
+                    if (st.totalQuestions) questionCount = st.totalQuestions
+                    if (st.timePerQuestion) timePerQuestion = st.timePerQuestion
+                } catch {
+                    // ignore
+                }
+            }
+
+            sessionStorage.setItem('quizexe_rematch_preset', JSON.stringify({
+                topic,
+                difficulty,
+                questionCount,
+                timePerQuestion,
+            }))
+            navigate('/create')
+        } catch {
+            navigate('/create')
         }
     }
 
@@ -281,14 +317,20 @@ export default function Results() {
                 {/* Actions */}
                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
                     <button
-                        onClick={() => navigate('/create')}
-                        className="btn-primary"
+                        onClick={handleRematch}
+                        className="btn-primary flex items-center justify-center gap-2"
                     >
-                        🔄 Host Another Table
+                        ⚡ Instant Rematch
+                    </button>
+                    <button
+                        onClick={() => navigate('/create')}
+                        className="btn-secondary flex items-center justify-center gap-2"
+                    >
+                        🔄 Host New Table
                     </button>
                     <button
                         onClick={() => navigate('/')}
-                        className="btn-secondary"
+                        className="btn-secondary flex items-center justify-center gap-2"
                     >
                         🏠 Return to Hall
                     </button>

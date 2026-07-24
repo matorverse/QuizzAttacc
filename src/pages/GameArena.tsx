@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase, Question, MatchScore } from '../lib/supabase'
 import { loadGameState, getStreakText } from '../lib/gameLogic'
+import { playClick, playCorrect, playIncorrect, playStreak, isAudioMuted, toggleAudioMute } from '../lib/audio'
 import Timer from '../components/Timer'
 import ScoreBoard from '../components/ScoreBoard'
 import ConnectionStatus from '../components/ConnectionStatus'
@@ -31,6 +32,7 @@ export default function GameArena() {
     const [myStreak, setMyStreak] = useState(0)
     const [opponentStreak, setOpponentStreak] = useState(0)
     const [connectionState, setConnectionState] = useState<'connected' | 'reconnecting' | 'disconnected'>('connected')
+    const [muted, setMuted] = useState(isAudioMuted())
 
     const prefetchedQuestionsRef = useRef<Record<number, Question>>({})
     const gameState = useMemo(() => loadGameState(), [])
@@ -323,6 +325,7 @@ export default function GameArena() {
     const handleAnswerSelect = async (answerIndex: number) => {
         if (submitting || selectedAnswer !== null) return
 
+        playClick()
         setSelectedAnswer(answerIndex)
         setSubmitting(true)
 
@@ -361,6 +364,13 @@ export default function GameArena() {
         setIsCorrect(result.isCorrect)
         setCorrectAnswerIndex(result.correctAnswerIndex)
         setShowFeedback(true)
+
+        if (result.isCorrect) {
+            playCorrect()
+            if (myStreak >= 2) playStreak()
+        } else {
+            playIncorrect()
+        }
 
         setTimeout(() => {
             if (result.matchComplete) {
@@ -521,14 +531,31 @@ export default function GameArena() {
     if (!currentQuestion) return null
 
     return (
-        <div className="min-h-screen p-4 md:p-8">
+        <div className="min-h-screen p-4 md:p-8 relative">
+            {/* Floating Connection Fluctuation Banner */}
+            {connectionState !== 'connected' && (
+                <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-amber-900/90 text-amber-200 border border-amber-500/50 px-4 py-2 rounded-full text-xs font-serif shadow-lg animate-pulse flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                    Network fluctuating - scores auto-syncing via backup link...
+                </div>
+            )}
+
             <div className="max-w-4xl mx-auto">
                 {/* Header */}
                 <div className="flex items-center justify-between mb-4 font-serif">
                     <div className="text-xs md:text-sm text-parchment-muted tracking-wider uppercase">
                         Question Scroll {questionOrder} of {totalQuestions}
                     </div>
-                    <ConnectionStatus state={connectionState} />
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={() => setMuted(toggleAudioMute())}
+                            className="px-2.5 py-1 rounded-lg bg-wood-medium/70 text-gold hover:text-gold-light border border-gold/40 text-xs font-serif transition-colors flex items-center gap-1 shadow-sm"
+                            title={muted ? 'Unmute Sound' : 'Mute Sound'}
+                        >
+                            {muted ? '🔇 Muted' : '🔊 Sound'}
+                        </button>
+                        <ConnectionStatus state={connectionState} />
+                    </div>
                 </div>
 
                 {/* Scoreboard */}

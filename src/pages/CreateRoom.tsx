@@ -25,6 +25,23 @@ export default function CreateRoom() {
     })
 
     useEffect(() => {
+        const presetStr = sessionStorage.getItem('quizexe_rematch_preset')
+        if (presetStr) {
+            try {
+                const p = JSON.parse(presetStr)
+                setFormData((prev) => ({
+                    ...prev,
+                    topic: p.topic || prev.topic,
+                    difficulty: p.difficulty || prev.difficulty,
+                    questionCount: p.questionCount || prev.questionCount,
+                    timePerQuestion: p.timePerQuestion || prev.timePerQuestion,
+                }))
+                sessionStorage.removeItem('quizexe_rematch_preset')
+            } catch {
+                // ignore
+            }
+        }
+
         return () => {
             if (channelRef.current) {
                 channelRef.current.unsubscribe()
@@ -38,6 +55,18 @@ export default function CreateRoom() {
     }, [])
 
     const createRoomDirectly = async () => {
+        // Fallback Rate Limiting: Max 5 rooms created per hour
+        const storageKey = 'quizexe_recent_rooms'
+        const recentStr = localStorage.getItem(storageKey)
+        const now = Date.now()
+        const oneHourAgo = now - 60 * 60 * 1000
+        let timestamps: number[] = recentStr ? JSON.parse(recentStr) : []
+        timestamps = timestamps.filter((t) => t > oneHourAgo)
+
+        if (timestamps.length >= 5) {
+            throw new Error('Rate limit exceeded: Maximum 5 rooms hosted per hour')
+        }
+
         const { data: { user } } = await supabase.auth.getUser()
         let playerId: string
         if (user) {
@@ -56,10 +85,22 @@ export default function CreateRoom() {
             playerId = newP.id
         }
 
+        // Retry loop to ensure unique 6-character room code
         const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
         let code = ''
-        for (let i = 0; i < 6; i++) {
-            code += chars.charAt(Math.floor(Math.random() * chars.length))
+        let isUnique = false
+        let attempts = 0
+
+        while (!isUnique && attempts < 5) {
+            code = ''
+            for (let i = 0; i < 6; i++) {
+                code += chars.charAt(Math.floor(Math.random() * chars.length))
+            }
+            const { data: existingRoom } = await supabase.from('rooms').select('id').eq('code', code).maybeSingle()
+            if (!existingRoom) {
+                isUnique = true
+            }
+            attempts++
         }
 
         const { data: room, error: roomErr } = await supabase.from('rooms').insert({
@@ -80,6 +121,9 @@ export default function CreateRoom() {
         }).select('*').single()
 
         if (matchErr) throw matchErr
+
+        timestamps.push(now)
+        localStorage.setItem(storageKey, JSON.stringify(timestamps))
 
         return {
             success: true,

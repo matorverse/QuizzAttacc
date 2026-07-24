@@ -5,27 +5,36 @@ interface TimerProps {
     duration: number
     onTimeout: () => void
     paused?: boolean
+    startTime?: number
 }
 
-export default function Timer({ duration, onTimeout, paused = false }: TimerProps) {
-    const [remaining, setRemaining] = useState(duration)
+export default function Timer({ duration, onTimeout, paused = false, startTime }: TimerProps) {
+    const calcRemaining = () => {
+        if (!startTime) return duration
+        const elapsedSeconds = (Date.now() - startTime) / 1000
+        return Math.max(0, Math.ceil(duration - elapsedSeconds))
+    }
+
+    const [remaining, setRemaining] = useState<number>(calcRemaining)
+
+    useEffect(() => {
+        setRemaining(calcRemaining())
+    }, [duration, startTime])
 
     useEffect(() => {
         if (paused) return
 
         const interval = setInterval(() => {
-            setRemaining((prev) => {
-                if (prev <= 1) {
-                    clearInterval(interval)
-                    onTimeout()
-                    return 0
-                }
-                return prev - 1
-            })
-        }, 1000)
+            const currentRemaining = calcRemaining()
+            setRemaining(currentRemaining)
+            if (currentRemaining <= 0) {
+                clearInterval(interval)
+                onTimeout()
+            }
+        }, 200)
 
         return () => clearInterval(interval)
-    }, [paused, onTimeout])
+    }, [paused, startTime, duration, onTimeout])
 
     const percentage = (remaining / duration) * 100
     const circumference = 2 * Math.PI * 54
@@ -54,7 +63,7 @@ export default function Timer({ duration, onTimeout, paused = false }: TimerProp
                     fill="none"
                     strokeDasharray={circumference}
                     strokeDashoffset={strokeDashoffset}
-                    className={`${colorClass} transition-all duration-1000 ease-linear`}
+                    className={`${colorClass} transition-all duration-300 ease-linear`}
                     strokeLinecap="round"
                 />
             </svg>

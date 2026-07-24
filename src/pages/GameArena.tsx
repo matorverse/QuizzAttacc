@@ -215,6 +215,43 @@ export default function GameArena() {
         }
     }, [waitingForOpponent, matchId, navigate])
 
+    useEffect(() => {
+        if (!matchId || connectionState === 'connected') return
+
+        const fetchScoresFallback = async () => {
+            const { data: scoresData } = await supabase
+                .from('match_scores')
+                .select('*')
+                .eq('match_id', matchId)
+
+            if (scoresData && gameState) {
+                let mScore = 0
+                let oScore = 0
+                let mStreak = 0
+                let oStreak = 0
+
+                scoresData.forEach((s: MatchScore) => {
+                    if (s.player_id === gameState.playerId) {
+                        mScore += s.total_points
+                        mStreak = s.current_streak
+                    } else {
+                        oScore += s.total_points
+                        oStreak = s.current_streak
+                    }
+                })
+
+                setMyScore(mScore)
+                setOpponentScore(oScore)
+                setMyStreak(mStreak)
+                setOpponentStreak(oStreak)
+            }
+        }
+
+        fetchScoresFallback()
+        const interval = setInterval(fetchScoresFallback, 2500)
+        return () => clearInterval(interval)
+    }, [matchId, connectionState, gameState])
+
     const prefetchQuestion = async (order: number) => {
         if (!matchId || prefetchedQuestionsRef.current[order]) return
         try {
@@ -237,25 +274,39 @@ export default function GameArena() {
     const loadQuestion = async (order: number) => {
         try {
             let questionToSet: Question | null = null
+            let startTimeMs = Date.now()
 
-            if (prefetchedQuestionsRef.current[order]) {
-                questionToSet = prefetchedQuestionsRef.current[order]
-            } else {
-                const { data: matchQuestion, error: mqError } = await supabase
-                    .from('match_questions')
-                    .select('question_id, questions(*)')
-                    .eq('match_id', matchId!)
-                    .eq('question_order', order)
-                    .single()
+            const { data: matchQuestion, error: mqError } = await supabase
+                .from('match_questions')
+                .select('question_id, started_at, questions(*)')
+                .eq('match_id', matchId!)
+                .eq('question_order', order)
+                .single()
 
-                if (mqError) throw mqError
+            if (!mqError && matchQuestion) {
                 // @ts-ignore
                 questionToSet = matchQuestion.questions
+                if (matchQuestion.started_at) {
+                    startTimeMs = new Date(matchQuestion.started_at).getTime()
+                } else {
+                    const nowIso = new Date().toISOString()
+                    startTimeMs = new Date(nowIso).getTime()
+                    supabase
+                        .from('match_questions')
+                        .update({ started_at: nowIso })
+                        .eq('match_id', matchId!)
+                        .eq('question_order', order)
+                        .then()
+                }
+            } else if (prefetchedQuestionsRef.current[order]) {
+                questionToSet = prefetchedQuestionsRef.current[order]
+            } else {
+                throw mqError
             }
 
             setCurrentQuestion(questionToSet)
             setQuestionOrder(order)
-            setQuestionStartTime(Date.now())
+            setQuestionStartTime(startTimeMs)
             setSelectedAnswer(null)
             setIsCorrect(null)
             setCorrectAnswerIndex(null)
@@ -495,6 +546,7 @@ export default function GameArena() {
                     <Timer
                         key={questionOrder}
                         duration={timePerQuestion}
+                        startTime={questionStartTime}
                         onTimeout={handleTimeout}
                         paused={showFeedback}
                     />

@@ -167,6 +167,10 @@ export default function CreateRoom() {
                         }
                     }
                 )
+                .on('broadcast', { event: 'PLAYER_JOINED' }, () => {
+                    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+                    navigate(`/game/${result.matchId}`)
+                })
                 .subscribe((status) => {
                     if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
                         startPollingFallback()

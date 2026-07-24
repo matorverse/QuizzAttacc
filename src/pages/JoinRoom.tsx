@@ -165,6 +165,22 @@ export default function JoinRoom() {
 
             if (!result || !result.success) throw new Error('Failed to join room')
 
+            // Send instant Realtime broadcast signal so host navigates immediately without waiting for DB CDC
+            try {
+                const bChannel = supabase.channel(`match:${result.matchId}`)
+                bChannel.subscribe((status) => {
+                    if (status === 'SUBSCRIBED') {
+                        bChannel.send({
+                            type: 'broadcast',
+                            event: 'PLAYER_JOINED',
+                            payload: { matchId: result.matchId },
+                        })
+                    }
+                })
+            } catch {
+                // Ignore broadcast error fallback
+            }
+
             saveGameState({
                 matchId: result.matchId,
                 playerId: result.playerId,

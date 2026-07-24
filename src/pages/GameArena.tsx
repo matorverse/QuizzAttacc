@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase, Question, MatchScore } from '../lib/supabase'
 import { loadGameState, getStreakText } from '../lib/gameLogic'
@@ -32,6 +32,7 @@ export default function GameArena() {
     const [opponentStreak, setOpponentStreak] = useState(0)
     const [connectionState, setConnectionState] = useState<'connected' | 'reconnecting' | 'disconnected'>('connected')
 
+    const prefetchedQuestionsRef = useRef<Record<number, Question>>({})
     const gameState = useMemo(() => loadGameState(), [])
 
     useEffect(() => {
@@ -190,19 +191,69 @@ export default function GameArena() {
         }
     }, [matchId])
 
-    const loadQuestion = async (order: number) => {
+    useEffect(() => {
+        if (!waitingForOpponent || !matchId) return
+
+        let isSubscribed = true
+        const checkStatus = async () => {
+            const { data } = await supabase
+                .from('matches')
+                .select('status')
+                .eq('id', matchId)
+                .single()
+
+            if (isSubscribed && data && data.status === 'finished') {
+                navigate(`/results/${matchId}`)
+            }
+        }
+
+        checkStatus()
+        const interval = setInterval(checkStatus, 1500)
+        return () => {
+            isSubscribed = false
+            clearInterval(interval)
+        }
+    }, [waitingForOpponent, matchId, navigate])
+
+    const prefetchQuestion = async (order: number) => {
+        if (!matchId || prefetchedQuestionsRef.current[order]) return
         try {
-            const { data: matchQuestion, error: mqError } = await supabase
+            const { data: matchQuestion } = await supabase
                 .from('match_questions')
                 .select('question_id, questions(*)')
-                .eq('match_id', matchId!)
+                .eq('match_id', matchId)
                 .eq('question_order', order)
                 .single()
 
-            if (mqError) throw mqError
+            if (matchQuestion?.questions) {
+                // @ts-ignore
+                prefetchedQuestionsRef.current[order] = matchQuestion.questions
+            }
+        } catch {
+            // Background prefetch errors fail silently
+        }
+    }
 
-            // @ts-ignore
-            setCurrentQuestion(matchQuestion.questions)
+    const loadQuestion = async (order: number) => {
+        try {
+            let questionToSet: Question | null = null
+
+            if (prefetchedQuestionsRef.current[order]) {
+                questionToSet = prefetchedQuestionsRef.current[order]
+            } else {
+                const { data: matchQuestion, error: mqError } = await supabase
+                    .from('match_questions')
+                    .select('question_id, questions(*)')
+                    .eq('match_id', matchId!)
+                    .eq('question_order', order)
+                    .single()
+
+                if (mqError) throw mqError
+                // @ts-ignore
+                questionToSet = matchQuestion.questions
+            }
+
+            setCurrentQuestion(questionToSet)
             setQuestionOrder(order)
             setQuestionStartTime(Date.now())
             setSelectedAnswer(null)
@@ -210,6 +261,9 @@ export default function GameArena() {
             setCorrectAnswerIndex(null)
             setShowFeedback(false)
             setLoading(false)
+
+            // Trigger background prefetch for the next question scroll
+            prefetchQuestion(order + 1)
         } catch (error) {
             console.error('Error loading question:', error)
         }
@@ -260,6 +314,8 @@ export default function GameArena() {
         setTimeout(() => {
             if (result.matchComplete) {
                 navigate(`/results/${matchId}`)
+            } else if (result.isPlayerFinished || questionOrder >= totalQuestions) {
+                setWaitingForOpponent(true)
             } else {
                 const nextOrder = questionOrder + 1
                 if (nextOrder <= totalQuestions) {
@@ -335,11 +391,30 @@ export default function GameArena() {
 
         const isLastQuestion = questionOrder >= totalQuestions
 
+        const { data: totalAnswers } = await supabase
+            .from('player_answers')
+            .select('id')
+            .eq('match_id', matchId!)
+
+        const expectedAnswers = totalQuestions * 2
+        const isMatchFinished = (totalAnswers?.length || 0) >= expectedAnswers
+
+        if (isMatchFinished) {
+            await supabase
+                .from('matches')
+                .update({
+                    status: 'finished',
+                    finished_at: new Date().toISOString(),
+                })
+                .eq('id', matchId!)
+        }
+
         return {
             success: true,
             isCorrect: isAnsCorrect,
             correctAnswerIndex: correctIndex,
-            matchComplete: isLastQuestion,
+            matchComplete: isMatchFinished,
+            isPlayerFinished: isLastQuestion,
         }
     }
 

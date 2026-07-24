@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { getPlayerAvatar, getStreakText, formatScore } from '../lib/gameLogic'
 
 interface ScoreBoardProps {
@@ -9,7 +10,7 @@ interface ScoreBoardProps {
     player2Streak: number
 }
 
-export default function ScoreBoard({
+function ScoreBoard({
     player1Name,
     player2Name,
     player1Score,
@@ -59,3 +60,5 @@ export default function ScoreBoard({
         </div>
     )
 }
+
+export default memo(ScoreBoard)

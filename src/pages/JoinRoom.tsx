@@ -49,6 +49,19 @@ export default function JoinRoom() {
         if (match.player2_id) throw new Error('Room is full')
         if (match.player1_id === playerId) throw new Error('You are already the host of this room')
 
+        // Attempt RPC call first for ultra-fast atomic execution
+        try {
+            const { data: rpcResult, error: rpcErr } = await supabase.rpc('join_and_setup_match', {
+                p_match_id: match.id,
+                p_player2_id: playerId,
+            })
+            if (!rpcErr && rpcResult && rpcResult.success) {
+                return rpcResult
+            }
+        } catch {
+            // Fallback to client multi-query approach if RPC is not deployed
+        }
+
         await supabase.from('matches').update({
             player2_id: playerId,
             status: 'active',

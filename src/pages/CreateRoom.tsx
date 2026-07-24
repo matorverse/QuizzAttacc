@@ -14,6 +14,7 @@ export default function CreateRoom() {
     const [error, setError] = useState('')
     const [roomCode, setRoomCode] = useState('')
     const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+    const pollIntervalRef = useRef<any>(null)
 
     const [formData, setFormData] = useState({
         displayName: '',
@@ -28,6 +29,10 @@ export default function CreateRoom() {
             if (channelRef.current) {
                 channelRef.current.unsubscribe()
                 channelRef.current = null
+            }
+            if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current)
+                pollIntervalRef.current = null
             }
         }
     }, [])
@@ -129,6 +134,22 @@ export default function CreateRoom() {
                 difficulty: formData.difficulty,
             })
 
+            const startPollingFallback = () => {
+                if (pollIntervalRef.current) return
+                pollIntervalRef.current = setInterval(async () => {
+                    const { data: checkMatch } = await supabase
+                        .from('matches')
+                        .select('status')
+                        .eq('id', result.matchId)
+                        .single()
+
+                    if (checkMatch && checkMatch.status === 'active') {
+                        if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+                        navigate(`/game/${result.matchId}`)
+                    }
+                }, 2000)
+            }
+
             const channel = supabase
                 .channel(`match:${result.matchId}`)
                 .on(
@@ -141,27 +162,18 @@ export default function CreateRoom() {
                     },
                     (payload) => {
                         if (payload.new.status === 'active') {
+                            if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
                             navigate(`/game/${result.matchId}`)
                         }
                     }
                 )
-                .subscribe()
+                .subscribe((status) => {
+                    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                        startPollingFallback()
+                    }
+                })
 
             channelRef.current = channel
-
-            // Polling fallback every 1.5s in case Realtime WebSocket publication isn't enabled
-            const pollInterval = setInterval(async () => {
-                const { data: checkMatch } = await supabase
-                    .from('matches')
-                    .select('status')
-                    .eq('id', result.matchId)
-                    .single()
-
-                if (checkMatch && checkMatch.status === 'active') {
-                    clearInterval(pollInterval)
-                    navigate(`/game/${result.matchId}`)
-                }
-            }, 1500)
         } catch (err: any) {
             setError(err.message || 'Failed to create room')
             setLoading(false)

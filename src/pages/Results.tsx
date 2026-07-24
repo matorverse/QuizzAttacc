@@ -20,39 +20,152 @@ export default function Results() {
         init()
     }, [matchId])
 
+    const computeDynamicSummary = async (): Promise<MatchSummary | null> => {
+        try {
+            const { data: matchData } = await supabase
+                .from('matches')
+                .select('*')
+                .eq('id', matchId!)
+                .single()
+
+            if (!matchData) return null
+
+            const p1Id = matchData.player1_id
+            const p2Id = matchData.player2_id || ''
+
+            const { data: scores } = await supabase
+                .from('match_scores')
+                .select('*')
+                .eq('match_id', matchId!)
+
+            const { data: answers } = await supabase
+                .from('player_answers')
+                .select('*')
+                .eq('match_id', matchId!)
+
+            let p1Score = 0, p2Score = 0
+            let p1Correct = 0, p2Correct = 0
+            let p1Total = 0, p2Total = 0
+            let p1TimeSum = 0, p2TimeSum = 0
+
+            ;(scores || []).forEach((s) => {
+                if (s.player_id === p1Id) p1Score += s.total_points
+                else if (s.player_id === p2Id) p2Score += s.total_points
+            })
+
+            ;(answers || []).forEach((a) => {
+                if (a.player_id === p1Id) {
+                    p1Total++
+                    p1TimeSum += a.time_taken_ms
+                    if (a.is_correct) p1Correct++
+                } else if (a.player_id === p2Id) {
+                    p2Total++
+                    p2TimeSum += a.time_taken_ms
+                    if (a.is_correct) p2Correct++
+                }
+            })
+
+            const p1AvgTime = p1Total > 0 ? Math.round(p1TimeSum / p1Total) : 0
+            const p2AvgTime = p2Total > 0 ? Math.round(p2TimeSum / p2Total) : 0
+            const p1Acc = p1Total > 0 ? Math.round((p1Correct / p1Total) * 100) : 0
+            const p2Acc = p2Total > 0 ? Math.round((p2Correct / p2Total) * 100) : 0
+
+            let winnerId: string | undefined = undefined
+            if (p1Score > p2Score) winnerId = p1Id
+            else if (p2Score > p1Score) winnerId = p2Id
+            else if (p1AvgTime < p2AvgTime && p1AvgTime > 0) winnerId = p1Id
+            else if (p2AvgTime < p1AvgTime && p2AvgTime > 0) winnerId = p2Id
+
+            const startTime = matchData.started_at ? new Date(matchData.started_at).getTime() : Date.now()
+            const finishTime = matchData.finished_at ? new Date(matchData.finished_at).getTime() : Date.now()
+            const duration = Math.max(1, Math.round((finishTime - startTime) / 1000))
+
+            return {
+                id: `dynamic-${matchId}`,
+                match_id: matchId!,
+                winner_id: winnerId,
+                player1_id: p1Id,
+                player2_id: p2Id || p1Id,
+                player1_score: p1Score,
+                player2_score: p2Score,
+                player1_accuracy: p1Acc,
+                player2_accuracy: p2Acc,
+                player1_avg_time_ms: p1AvgTime,
+                player2_avg_time_ms: p2AvgTime,
+                total_duration_seconds: duration,
+                created_at: new Date().toISOString(),
+            }
+        } catch (e) {
+            console.error('Failed to compute dynamic summary fallback:', e)
+            return null
+        }
+    }
+
     const loadResults = async () => {
         try {
-            const { data: summaryData, error: summaryError } = await supabase
+            let summaryData: MatchSummary | null = null
+
+            // Try loading pre-generated match summary
+            const { data, error: summaryError } = await supabase
                 .from('match_summaries')
                 .select('*')
                 .eq('match_id', matchId!)
                 .single()
 
-            if (summaryError) throw summaryError
-            setSummary(summaryData)
-
-            const { data: players, error: playersError } = await supabase
-                .from('players')
-                .select('*')
-                .in('id', [summaryData.player1_id, summaryData.player2_id])
-
-            if (playersError) throw playersError
-
-            const p1 = players.find((p) => p.id === summaryData.player1_id)
-            const p2 = players.find((p) => p.id === summaryData.player2_id)
-
-            setPlayer1(p1 || null)
-            setPlayer2(p2 || null)
-
-            const gameState = localStorage.getItem('quizexe_game_state')
-            if (gameState) {
-                const state = JSON.parse(gameState)
-                setIsWinner(summaryData.winner_id === state.playerId)
+            if (!summaryError && data) {
+                summaryData = data
+            } else {
+                // Compute dynamically from player scores and answers
+                summaryData = await computeDynamicSummary()
             }
 
-            setLoading(false)
+            if (!summaryData) {
+                // Short wait retry if DB trigger was slightly delayed
+                await new Promise((resolve) => setTimeout(resolve, 800))
+                const { data: retryData } = await supabase
+                    .from('match_summaries')
+                    .select('*')
+                    .eq('match_id', matchId!)
+                    .single()
+                if (retryData) {
+                    summaryData = retryData
+                } else {
+                    summaryData = await computeDynamicSummary()
+                }
+            }
+
+            if (summaryData) {
+                setSummary(summaryData)
+
+                const playerIds = [summaryData.player1_id, summaryData.player2_id].filter(Boolean)
+                if (playerIds.length > 0) {
+                    const { data: players } = await supabase
+                        .from('players')
+                        .select('*')
+                        .in('id', playerIds)
+
+                    if (players) {
+                        const p1 = players.find((p) => p.id === summaryData.player1_id)
+                        const p2 = players.find((p) => p.id === summaryData.player2_id)
+                        setPlayer1(p1 || null)
+                        setPlayer2(p2 || null)
+                    }
+                }
+
+                const savedState = localStorage.getItem('quizexe_game_state')
+                if (savedState) {
+                    try {
+                        const state = JSON.parse(savedState)
+                        setIsWinner(summaryData.winner_id === state.playerId)
+                    } catch {
+                        // ignore parse error
+                    }
+                }
+            }
         } catch (error) {
             console.error('Error loading results:', error)
+        } finally {
+            setLoading(false)
         }
     }
 

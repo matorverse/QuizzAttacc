@@ -631,8 +631,8 @@ export default function GameArena() {
                         <div className="mt-6 animate-slide-up">
                             <div
                                 className={`p-4 rounded-xl border-2 ${isCorrect
-                                        ? 'bg-forest/10 border-forest text-forest'
-                                        : 'bg-burgundy/10 border-burgundy text-burgundy'
+                                    ? 'bg-forest/10 border-forest text-forest'
+                                    : 'bg-burgundy/10 border-burgundy text-burgundy'
                                     }`}
                             >
                                 <div className="font-serif font-bold text-base mb-1">

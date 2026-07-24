@@ -48,22 +48,22 @@ export default function Results() {
             let p1Total = 0, p2Total = 0
             let p1TimeSum = 0, p2TimeSum = 0
 
-            ;(scores || []).forEach((s) => {
-                if (s.player_id === p1Id) p1Score += s.total_points
-                else if (s.player_id === p2Id) p2Score += s.total_points
-            })
+                ; (scores || []).forEach((s) => {
+                    if (s.player_id === p1Id) p1Score += s.total_points
+                    else if (s.player_id === p2Id) p2Score += s.total_points
+                })
 
-            ;(answers || []).forEach((a) => {
-                if (a.player_id === p1Id) {
-                    p1Total++
-                    p1TimeSum += a.time_taken_ms
-                    if (a.is_correct) p1Correct++
-                } else if (a.player_id === p2Id) {
-                    p2Total++
-                    p2TimeSum += a.time_taken_ms
-                    if (a.is_correct) p2Correct++
-                }
-            })
+                ; (answers || []).forEach((a) => {
+                    if (a.player_id === p1Id) {
+                        p1Total++
+                        p1TimeSum += a.time_taken_ms
+                        if (a.is_correct) p1Correct++
+                    } else if (a.player_id === p2Id) {
+                        p2Total++
+                        p2TimeSum += a.time_taken_ms
+                        if (a.is_correct) p2Correct++
+                    }
+                })
 
             const p1AvgTime = p1Total > 0 ? Math.round(p1TimeSum / p1Total) : 0
             const p2AvgTime = p2Total > 0 ? Math.round(p2TimeSum / p2Total) : 0
@@ -159,7 +159,7 @@ export default function Results() {
                         const winner = summaryData.winner_id === state.playerId
                         setIsWinner(winner)
                         if (winner) {
-                            import('../lib/audio').then((m) => m.playVictory()).catch(() => {})
+                            import('../lib/audio').then((m) => m.playVictory()).catch(() => { })
                         }
                     } catch {
                         // ignore parse error

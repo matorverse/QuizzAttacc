@@ -303,8 +303,8 @@ export default function CreateRoom() {
                                             type="button"
                                             onClick={() => setFormData({ ...formData, difficulty: diff })}
                                             className={`py-2 px-3 rounded-xl border text-xs font-serif font-bold capitalize transition-all ${formData.difficulty === diff
-                                                    ? 'bg-wood-medium text-gold border-gold shadow-sm'
-                                                    : 'bg-parchment-dark/40 text-parchment-text border-parchment-border hover:bg-parchment'
+                                                ? 'bg-wood-medium text-gold border-gold shadow-sm'
+                                                : 'bg-parchment-dark/40 text-parchment-text border-parchment-border hover:bg-parchment'
                                                 }`}
                                         >
                                             {diff}
@@ -322,8 +322,8 @@ export default function CreateRoom() {
                                             type="button"
                                             onClick={() => setFormData({ ...formData, questionCount: count })}
                                             className={`py-2 px-3 rounded-xl border text-xs font-serif font-bold transition-all ${formData.questionCount === count
-                                                    ? 'bg-wood-medium text-gold border-gold shadow-sm'
-                                                    : 'bg-parchment-dark/40 text-parchment-text border-parchment-border hover:bg-parchment'
+                                                ? 'bg-wood-medium text-gold border-gold shadow-sm'
+                                                : 'bg-parchment-dark/40 text-parchment-text border-parchment-border hover:bg-parchment'
                                                 }`}
                                         >
                                             {count} Questions
@@ -341,8 +341,8 @@ export default function CreateRoom() {
                                             type="button"
                                             onClick={() => setFormData({ ...formData, timePerQuestion: time })}
                                             className={`py-2 px-3 rounded-xl border text-xs font-serif font-bold transition-all ${formData.timePerQuestion === time
-                                                    ? 'bg-wood-medium text-gold border-gold shadow-sm'
-                                                    : 'bg-parchment-dark/40 text-parchment-text border-parchment-border hover:bg-parchment'
+                                                ? 'bg-wood-medium text-gold border-gold shadow-sm'
+                                                : 'bg-parchment-dark/40 text-parchment-text border-parchment-border hover:bg-parchment'
                                                 }`}
                                         >
                                             {time}s

@@ -8,54 +8,61 @@
     color: #2C1B10;
     font-family: Lora, Georgia, serif;
     @apply antialiased;
-    background-image: 
+    background-image:
       radial-gradient(circle at 50% 0%, rgba(212, 175, 55, 0.08) 0%, transparent 60%),
       radial-gradient(circle at 50% 100%, rgba(42, 26, 16, 0.9) 0%, transparent 80%);
   }
 
-  h1, h2, h3, h4, h5, h6 {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     font-family: Cinzel, Georgia, serif;
     @apply tracking-wide;
   }
 }
 
 @layer components {
+
   /* Vintage Engraved Wooden Button Styles */
-  .btn-primary, .btn-wood {
+  .btn-primary,
+  .btn-wood {
     font-family: Cinzel, Georgia, serif;
     background-image: linear-gradient(to bottom, #5A3A23, #3E2718);
     border: 2px solid rgba(212, 175, 55, 0.6);
     color: #F3E5AB;
     box-shadow: 0 4px 0 #2A1A10, inset 0 1px 0 rgba(255, 255, 255, 0.2);
-    @apply px-6 py-3 rounded-xl font-bold tracking-wide
-           transition-all duration-200 active:translate-y-[2px] active:shadow-none
-           disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none;
+    @apply px-6 py-3 rounded-xl font-bold tracking-wide transition-all duration-200 active:translate-y-[2px] active:shadow-none disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none;
   }
 
-  .btn-primary:hover, .btn-wood:hover {
+  .btn-primary:hover,
+  .btn-wood:hover {
     background-image: linear-gradient(to bottom, #5A3A23, #2A1A10);
     border-color: #D4AF37;
     color: #FFFFFF;
   }
 
-  .btn-secondary, .btn-wood-secondary {
+  .btn-secondary,
+  .btn-wood-secondary {
     font-family: Cinzel, Georgia, serif;
     background-color: rgba(232, 219, 201, 0.8);
     border: 2px solid rgba(62, 39, 24, 0.6);
     color: #2A1A10;
-    @apply px-6 py-3 rounded-xl font-semibold shadow-sm
-           transition-all duration-200 active:translate-y-[2px]
-           disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply px-6 py-3 rounded-xl font-semibold shadow-sm transition-all duration-200 active:translate-y-[2px] disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
-  .btn-secondary:hover, .btn-wood-secondary:hover {
+  .btn-secondary:hover,
+  .btn-wood-secondary:hover {
     background-color: #F5ECE0;
     border-color: #3E2718;
     color: #1C120B;
   }
 
   /* Parchment Paper Card Styles */
-  .card, .card-parchment {
+  .card,
+  .card-parchment {
     background-color: #F5ECE0;
     color: #2C1B10;
     border: 2px solid rgba(216, 199, 176, 0.8);
@@ -116,7 +123,8 @@
   }
 
   /* Gradient text */
-  .text-gradient, .text-gold-gradient {
+  .text-gradient,
+  .text-gold-gradient {
     background-image: linear-gradient(to bottom, #F3E5AB, #D4AF37, #AA820A);
     -webkit-background-clip: text;
     background-clip: text;
@@ -139,10 +147,7 @@
     color: #F5ECE0;
     border: 2px solid rgba(90, 58, 35, 0.6);
     box-shadow: 0 4px 0 #2A1A10, inset 0 1px 0 rgba(255, 255, 255, 0.2);
-    @apply w-full p-4 rounded-xl
-           text-left font-medium
-           transition-all duration-200 active:scale-[0.99]
-           disabled:cursor-not-allowed;
+    @apply w-full p-4 rounded-xl text-left font-medium transition-all duration-200 active:scale-[0.99] disabled:cursor-not-allowed;
   }
 
   .answer-btn:hover {
@@ -197,6 +202,7 @@
     transform: translateY(0) rotate(0deg);
     opacity: 1;
   }
+
   100% {
     transform: translateY(-100vh) rotate(720deg);
     opacity: 0;

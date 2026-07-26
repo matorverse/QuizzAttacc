@@ -45,6 +45,10 @@ export const playClick = () => {
 
         osc.connect(gain)
         gain.connect(ctx.destination)
+        osc.onended = () => {
+            osc.disconnect()
+            gain.disconnect()
+        }
         osc.start()
         osc.stop(ctx.currentTime + 0.05)
     } catch {

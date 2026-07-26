@@ -226,13 +226,24 @@ export default function GameArena() {
 
         eventsChannelRef.current = eventsChannel
 
+        // Mobile visibility resume listener for auto-reconnecting WebSockets
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                scoreChannel.subscribe()
+                matchChannel.subscribe()
+                eventsChannel.subscribe()
+            }
+        }
+        document.addEventListener('visibilitychange', handleVisibilityChange)
+
         return () => {
             isMounted = false
             scoreChannel.unsubscribe()
             matchChannel.unsubscribe()
             eventsChannel.unsubscribe()
+            document.removeEventListener('visibilitychange', handleVisibilityChange)
         }
-    }, [matchId])
+    }, [matchId, questionOrder])
 
     useEffect(() => {
         if (!waitingForOpponent || !matchId) return
@@ -251,7 +262,7 @@ export default function GameArena() {
         }
 
         checkStatus()
-        const interval = setInterval(checkStatus, 1500)
+        const interval = setInterval(checkStatus, 1000) // Accelerated 1.0s polling
         return () => {
             isSubscribed = false
             clearInterval(interval)
@@ -291,7 +302,7 @@ export default function GameArena() {
         }
 
         fetchScoresFallback()
-        const interval = setInterval(fetchScoresFallback, 2500)
+        const interval = setInterval(fetchScoresFallback, 1000) // Accelerated 1.0s polling fallback
         return () => clearInterval(interval)
     }, [matchId, connectionState, gameState])
 
@@ -317,14 +328,15 @@ export default function GameArena() {
     const loadQuestion = async (order: number) => {
         try {
             let questionToSet: Question | null = null
-            let startTimeMs = Date.now()
+            // Per-Player Isolated Start Timestamp: Always anchor start time to the current local player's load moment
+            const startTimeMs = Date.now()
 
             if (prefetchedQuestionsRef.current[order]) {
                 questionToSet = prefetchedQuestionsRef.current[order]
             } else {
                 const { data: matchQuestion, error: mqError } = await supabase
                     .from('match_questions')
-                    .select('question_id, started_at, questions(*)')
+                    .select('question_id, questions(*)')
                     .eq('match_id', matchId!)
                     .eq('question_order', order)
                     .single()
@@ -332,9 +344,6 @@ export default function GameArena() {
                 if (!mqError && matchQuestion) {
                     // @ts-ignore
                     questionToSet = matchQuestion.questions
-                    if (matchQuestion.started_at) {
-                        startTimeMs = new Date(matchQuestion.started_at).getTime()
-                    }
                 } else {
                     throw mqError
                 }
@@ -359,15 +368,45 @@ export default function GameArena() {
     }
 
     const handleAnswerSelect = async (answerIndex: number) => {
-        if (submitting || selectedAnswer !== null) return
+        if (submitting || selectedAnswer !== null || !currentQuestion) return
 
-        triggerHaptic(40)
+        const correctIndex = currentQuestion.correct_answer_index ?? 0
+        const isAnsCorrect = answerIndex === correctIndex
+
+        // INSTANT OPTIMISTIC FEEDBACK (< 10 ms)
+        triggerHaptic(isAnsCorrect ? [40, 40] : [100, 50, 100])
         playClick()
+        if (isAnsCorrect) {
+            playCorrect()
+            if (myStreak >= 2) playStreak()
+        } else {
+            playIncorrect()
+        }
+
         setSelectedAnswer(answerIndex)
+        setIsCorrect(isAnsCorrect)
+        setCorrectAnswerIndex(correctIndex)
+        setShowFeedback(true)
         setSubmitting(true)
 
         const timeTaken = Date.now() - questionStartTime
-        let result: any = null
+
+        // Calculate local floating score text
+        if (isAnsCorrect) {
+            const timePerMs = timePerQuestion * 1000
+            const remainingRatio = Math.max(0, (timePerMs - timeTaken) / timePerMs)
+            const timeBonus = Math.floor(remainingRatio * 50)
+            let mult = 1.0
+            const newStreak = myStreak + 1
+            if (newStreak >= 3) mult = 1.3
+            else if (newStreak === 2) mult = 1.1
+
+            const totalPts = Math.floor((100 + timeBonus) * mult)
+            const streakBonusText = newStreak >= 2 ? ` • ${getStreakText(newStreak)}` : ''
+            setFloatingScoreText(`+${totalPts} PTS${streakBonusText}`)
+        } else {
+            setFloatingScoreText('✗ INCORRECT')
+        }
 
         // Broadcast real-time answer event to opponent
         if (eventsChannelRef.current) {
@@ -381,6 +420,21 @@ export default function GameArena() {
             })
         }
 
+        // Background Database Processing
+        submitAnswerInBackground(answerIndex, timeTaken)
+
+        setTimeout(() => {
+            const nextOrder = questionOrder + 1
+            if (nextOrder <= totalQuestions) {
+                loadQuestion(nextOrder)
+                setSubmitting(false)
+            } else {
+                setWaitingForOpponent(true)
+            }
+        }, 2500)
+    }
+
+    const submitAnswerInBackground = async (answerIndex: number, timeTaken: number) => {
         try {
             const { data, error } = await supabase.functions.invoke('submit-answer', {
                 body: {
@@ -394,55 +448,11 @@ export default function GameArena() {
             })
 
             if (error || !data?.success) {
-                console.warn('Edge function invoke fallback, using direct client DB:', error?.message || data?.error)
-                result = await submitAnswerDirectly(answerIndex, timeTaken)
-            } else {
-                result = data
+                await submitAnswerDirectly(answerIndex, timeTaken)
             }
-        } catch (edgeErr) {
-            console.warn('Edge Function unavailable, submitting answer directly via DB:', edgeErr)
-            result = await submitAnswerDirectly(answerIndex, timeTaken)
+        } catch {
+            await submitAnswerDirectly(answerIndex, timeTaken)
         }
-
-        if (!result || !result.success) {
-            setSubmitting(false)
-            setSelectedAnswer(null)
-            return
-        }
-
-        setIsCorrect(result.isCorrect)
-        setCorrectAnswerIndex(result.correctAnswerIndex)
-        setShowFeedback(true)
-
-        if (result.isCorrect) {
-            triggerHaptic([40, 40])
-            playCorrect()
-            if (myStreak >= 2) playStreak()
-
-            const pts = result.pointsEarned || 100
-            const streakBonus = myStreak >= 2 ? ` • ${getStreakText(myStreak + 1)}` : ''
-            setFloatingScoreText(`+${pts} PTS${streakBonus}`)
-        } else {
-            triggerHaptic([100, 50, 100])
-            playIncorrect()
-            setFloatingScoreText('✗ INCORRECT')
-        }
-
-        setTimeout(() => {
-            if (result.matchComplete) {
-                navigate(`/results/${matchId}`)
-            } else if (result.isPlayerFinished || questionOrder >= totalQuestions) {
-                setWaitingForOpponent(true)
-            } else {
-                const nextOrder = questionOrder + 1
-                if (nextOrder <= totalQuestions) {
-                    loadQuestion(nextOrder)
-                    setSubmitting(false)
-                } else {
-                    setWaitingForOpponent(true)
-                }
-            }
-        }, 2500)
     }
 
     const submitAnswerDirectly = async (answerIndex: number, timeTaken: number) => {
@@ -504,15 +514,6 @@ export default function GameArena() {
                 total_points: 0,
                 current_streak: 0,
             })
-        }
-
-        const isLastQuestion = questionOrder >= totalQuestions
-
-        return {
-            success: true,
-            isCorrect: isAnsCorrect,
-            correctAnswerIndex: correctIndex,
-            matchComplete: isLastQuestion,
         }
     }
 

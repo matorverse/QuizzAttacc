@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase, Question, MatchScore } from '../lib/supabase'
-import { loadGameState, getStreakText } from '../lib/gameLogic'
-import { playClick, playCorrect, playIncorrect, playStreak, isAudioMuted, toggleAudioMute } from '../lib/audio'
+import { loadGameState, getStreakText, getPlayerAvatar } from '../lib/gameLogic'
+import { playClick, playCorrect, playIncorrect, playStreak, isAudioMuted, toggleAudioMute, triggerHaptic } from '../lib/audio'
 import Timer from '../components/Timer'
 import ScoreBoard from '../components/ScoreBoard'
 import ConnectionStatus from '../components/ConnectionStatus'
+import BattleProgressBar from '../components/BattleProgressBar'
 
 export default function GameArena() {
     const { matchId } = useParams<{ matchId: string }>()
@@ -31,10 +32,15 @@ export default function GameArena() {
     const [opponentScore, setOpponentScore] = useState(0)
     const [myStreak, setMyStreak] = useState(0)
     const [opponentStreak, setOpponentStreak] = useState(0)
+    const [opponentQuestionOrder, setOpponentQuestionOrder] = useState(1)
+    const [opponentAnsweredCurrent, setOpponentAnsweredCurrent] = useState(false)
+    const [floatingScoreText, setFloatingScoreText] = useState<string | null>(null)
+
     const [connectionState, setConnectionState] = useState<'connected' | 'reconnecting' | 'disconnected'>('connected')
     const [muted, setMuted] = useState(isAudioMuted())
 
     const prefetchedQuestionsRef = useRef<Record<number, Question>>({})
+    const eventsChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
     const gameState = useMemo(() => loadGameState(), [])
 
     useEffect(() => {
@@ -50,6 +56,22 @@ export default function GameArena() {
 
         const initializeArena = async () => {
             try {
+                // Bulk-fetch all questions for the match deck to ensure 0ms load delay
+                const { data: mqList } = await supabase
+                    .from('match_questions')
+                    .select('question_order, question_id, questions(*)')
+                    .eq('match_id', matchId)
+                    .order('question_order', { ascending: true })
+
+                if (mqList && isMounted) {
+                    mqList.forEach((item) => {
+                        if (item.questions) {
+                            // @ts-ignore
+                            prefetchedQuestionsRef.current[item.question_order] = item.questions
+                        }
+                    })
+                }
+
                 const { data: matchData, error: matchError } = await supabase
                     .from('matches')
                     .select('*, rooms(*)')
@@ -139,6 +161,7 @@ export default function GameArena() {
 
         initializeArena()
 
+        // Realtime Scores Channel
         const scoreChannel = supabase
             .channel(`match_scores:${matchId}`)
             .on(
@@ -168,6 +191,7 @@ export default function GameArena() {
                 }
             })
 
+        // Realtime Match Status Channel
         const matchChannel = supabase
             .channel(`match_status:${matchId}`)
             .on(
@@ -186,10 +210,27 @@ export default function GameArena() {
             )
             .subscribe()
 
+        // Live Realtime Broadcast Channel for Opponent Progress & Locked In Status
+        const eventsChannel = supabase
+            .channel(`match_events:${matchId}`)
+            .on('broadcast', { event: 'PLAYER_ANSWERED' }, (payload) => {
+                if (payload.payload?.playerId !== gameState.playerId) {
+                    const oppOrder = payload.payload?.questionOrder || 1
+                    setOpponentQuestionOrder(oppOrder)
+                    if (oppOrder === questionOrder) {
+                        setOpponentAnsweredCurrent(true)
+                    }
+                }
+            })
+            .subscribe()
+
+        eventsChannelRef.current = eventsChannel
+
         return () => {
             isMounted = false
             scoreChannel.unsubscribe()
             matchChannel.unsubscribe()
+            eventsChannel.unsubscribe()
         }
     }, [matchId])
 
@@ -278,32 +319,25 @@ export default function GameArena() {
             let questionToSet: Question | null = null
             let startTimeMs = Date.now()
 
-            const { data: matchQuestion, error: mqError } = await supabase
-                .from('match_questions')
-                .select('question_id, started_at, questions(*)')
-                .eq('match_id', matchId!)
-                .eq('question_order', order)
-                .single()
-
-            if (!mqError && matchQuestion) {
-                // @ts-ignore
-                questionToSet = matchQuestion.questions
-                if (matchQuestion.started_at) {
-                    startTimeMs = new Date(matchQuestion.started_at).getTime()
-                } else {
-                    const nowIso = new Date().toISOString()
-                    startTimeMs = new Date(nowIso).getTime()
-                    supabase
-                        .from('match_questions')
-                        .update({ started_at: nowIso })
-                        .eq('match_id', matchId!)
-                        .eq('question_order', order)
-                        .then()
-                }
-            } else if (prefetchedQuestionsRef.current[order]) {
+            if (prefetchedQuestionsRef.current[order]) {
                 questionToSet = prefetchedQuestionsRef.current[order]
             } else {
-                throw mqError
+                const { data: matchQuestion, error: mqError } = await supabase
+                    .from('match_questions')
+                    .select('question_id, started_at, questions(*)')
+                    .eq('match_id', matchId!)
+                    .eq('question_order', order)
+                    .single()
+
+                if (!mqError && matchQuestion) {
+                    // @ts-ignore
+                    questionToSet = matchQuestion.questions
+                    if (matchQuestion.started_at) {
+                        startTimeMs = new Date(matchQuestion.started_at).getTime()
+                    }
+                } else {
+                    throw mqError
+                }
             }
 
             setCurrentQuestion(questionToSet)
@@ -313,9 +347,11 @@ export default function GameArena() {
             setIsCorrect(null)
             setCorrectAnswerIndex(null)
             setShowFeedback(false)
+            setOpponentAnsweredCurrent(false)
+            setFloatingScoreText(null)
             setLoading(false)
 
-            // Trigger background prefetch for the next question scroll
+            // Background prefetch for subsequent order
             prefetchQuestion(order + 1)
         } catch (error) {
             console.error('Error loading question:', error)
@@ -325,12 +361,25 @@ export default function GameArena() {
     const handleAnswerSelect = async (answerIndex: number) => {
         if (submitting || selectedAnswer !== null) return
 
+        triggerHaptic(40)
         playClick()
         setSelectedAnswer(answerIndex)
         setSubmitting(true)
 
         const timeTaken = Date.now() - questionStartTime
         let result: any = null
+
+        // Broadcast real-time answer event to opponent
+        if (eventsChannelRef.current) {
+            eventsChannelRef.current.send({
+                type: 'broadcast',
+                event: 'PLAYER_ANSWERED',
+                payload: {
+                    playerId: gameState?.playerId,
+                    questionOrder,
+                },
+            })
+        }
 
         try {
             const { data, error } = await supabase.functions.invoke('submit-answer', {
@@ -366,10 +415,17 @@ export default function GameArena() {
         setShowFeedback(true)
 
         if (result.isCorrect) {
+            triggerHaptic([40, 40])
             playCorrect()
             if (myStreak >= 2) playStreak()
+
+            const pts = result.pointsEarned || 100
+            const streakBonus = myStreak >= 2 ? ` • ${getStreakText(myStreak + 1)}` : ''
+            setFloatingScoreText(`+${pts} PTS${streakBonus}`)
         } else {
+            triggerHaptic([100, 50, 100])
             playIncorrect()
+            setFloatingScoreText('✗ INCORRECT')
         }
 
         setTimeout(() => {
@@ -452,30 +508,11 @@ export default function GameArena() {
 
         const isLastQuestion = questionOrder >= totalQuestions
 
-        const { data: totalAnswers } = await supabase
-            .from('player_answers')
-            .select('id')
-            .eq('match_id', matchId!)
-
-        const expectedAnswers = totalQuestions * 2
-        const isMatchFinished = (totalAnswers?.length || 0) >= expectedAnswers
-
-        if (isMatchFinished) {
-            await supabase
-                .from('matches')
-                .update({
-                    status: 'finished',
-                    finished_at: new Date().toISOString(),
-                })
-                .eq('id', matchId!)
-        }
-
         return {
             success: true,
             isCorrect: isAnsCorrect,
             correctAnswerIndex: correctIndex,
-            matchComplete: isMatchFinished,
-            isPlayerFinished: isLastQuestion,
+            matchComplete: isLastQuestion,
         }
     }
 
@@ -542,9 +579,14 @@ export default function GameArena() {
 
             <div className="max-w-4xl mx-auto">
                 {/* Header */}
-                <div className="flex items-center justify-between mb-4 font-serif">
-                    <div className="text-xs md:text-sm text-parchment-muted tracking-wider uppercase">
-                        Question Scroll {questionOrder} of {totalQuestions}
+                <div className="flex items-center justify-between mb-3 font-serif">
+                    <div className="text-xs md:text-sm text-parchment-muted tracking-wider uppercase flex items-center gap-2">
+                        <span>Scroll {questionOrder} of {totalQuestions}</span>
+                        {opponentAnsweredCurrent && (
+                            <span className="px-2 py-0.5 rounded-full bg-gold/20 text-gold-light border border-gold/40 text-[10px] animate-pulse font-bold">
+                                ⚡ Opponent Locked In!
+                            </span>
+                        )}
                     </div>
                     <div className="flex items-center gap-3">
                         <button
@@ -557,6 +599,18 @@ export default function GameArena() {
                         <ConnectionStatus state={connectionState} />
                     </div>
                 </div>
+
+                {/* 10-Step Progress Scrollbar */}
+                <BattleProgressBar
+                    totalQuestions={totalQuestions}
+                    currentQuestionOrder={questionOrder}
+                    opponentQuestionOrder={opponentQuestionOrder}
+                    opponentAnsweredCurrent={opponentAnsweredCurrent}
+                    player1Avatar={getPlayerAvatar(myPlayerName)}
+                    player2Avatar={getPlayerAvatar(opponentPlayerName)}
+                    player1Name={myPlayerName}
+                    player2Name={opponentPlayerName}
+                />
 
                 {/* Scoreboard */}
                 <ScoreBoard
@@ -580,11 +634,22 @@ export default function GameArena() {
                 </div>
 
                 {/* Question Scroll Card */}
-                <div className="card-parchment mb-6 animate-scale-in">
+                <div className={`card-parchment mb-6 animate-scale-in transition-all duration-300 relative ${
+                    showFeedback ? (isCorrect ? 'border-forest/60 ring-2 ring-forest/30' : 'border-burgundy/60 ring-2 ring-burgundy/30') : ''
+                }`}>
+                    {/* Floating Score Combat Text Popups */}
+                    {floatingScoreText && (
+                        <div className={`absolute top-3 right-4 px-3 py-1 rounded-full text-xs font-serif font-bold shadow-lg animate-bounce z-20 ${
+                            isCorrect ? 'bg-forest text-parchment border border-emerald-400' : 'bg-burgundy text-parchment border border-rose-400'
+                        }`}>
+                            {floatingScoreText}
+                        </div>
+                    )}
+
                     <div className="inline-block px-3 py-1 bg-parchment-dark/70 text-parchment-muted rounded-full text-xs font-serif font-semibold tracking-wider uppercase mb-4 border border-parchment-border">
                         {currentQuestion.topic} • {currentQuestion.difficulty}
                     </div>
-                    <h2 className="text-2xl md:text-3xl font-serif font-bold mb-8 text-center text-parchment-text leading-snug">
+                    <h2 className="text-lg sm:text-2xl md:text-3xl font-serif font-bold mb-4 sm:mb-8 text-center text-parchment-text leading-snug">
                         {currentQuestion.question_text}
                     </h2>
 
@@ -613,13 +678,13 @@ export default function GameArena() {
                                     disabled={submitting || showFeedback}
                                     className={buttonClass}
                                 >
-                                    <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-3 w-full">
                                         <div className="w-8 h-8 rounded-lg bg-wood-medium border border-gold/40 text-gold flex items-center justify-center font-serif font-bold text-sm flex-shrink-0 shadow-sm">
                                             {String.fromCharCode(65 + index)}
                                         </div>
-                                        <div className="flex-1 text-left font-body">{option}</div>
-                                        {showFeedback && isThisCorrect && <span className="text-forest font-bold">✓</span>}
-                                        {showFeedback && isThisWrong && <span className="text-burgundy font-bold">✗</span>}
+                                        <div className="flex-1 text-left font-body text-sm sm:text-base">{option}</div>
+                                        {showFeedback && isThisCorrect && <span className="text-forest font-bold text-base">✓</span>}
+                                        {showFeedback && isThisWrong && <span className="text-burgundy font-bold text-base">✗</span>}
                                     </div>
                                 </button>
                             )
@@ -630,10 +695,11 @@ export default function GameArena() {
                     {showFeedback && (
                         <div className="mt-6 animate-slide-up">
                             <div
-                                className={`p-4 rounded-xl border-2 ${isCorrect
-                                    ? 'bg-forest/10 border-forest text-forest'
-                                    : 'bg-burgundy/10 border-burgundy text-burgundy'
-                                    }`}
+                                className={`p-4 rounded-xl border-2 ${
+                                    isCorrect
+                                        ? 'bg-forest/10 border-forest text-forest'
+                                        : 'bg-burgundy/10 border-burgundy text-burgundy'
+                                }`}
                             >
                                 <div className="font-serif font-bold text-base mb-1">
                                     {isCorrect ? '✓ Excellent! Correct Answer.' : '✗ Incorrect Choice'}
@@ -649,7 +715,7 @@ export default function GameArena() {
                 {/* Streak indicator */}
                 {myStreak > 0 && !showFeedback && (
                     <div className="text-center font-serif text-gold font-bold animate-pulse text-sm">
-                        {getStreakText(myStreak)} Streak Multiplier Active!
+                        🪙 {getStreakText(myStreak)} Streak Multiplier Active!
                     </div>
                 )}
             </div>

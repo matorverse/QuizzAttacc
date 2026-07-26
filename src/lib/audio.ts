@@ -164,3 +164,39 @@ export const playVictory = () => {
         // Audio error fallback
     }
 }
+
+export const playEmergencyTick = () => {
+    if (muted) return
+    const ctx = getAudioContext()
+    if (!ctx) return
+
+    try {
+        const now = ctx.currentTime
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+
+        osc.type = 'sine'
+        osc.frequency.setValueAtTime(880, now) // High pitch A5 urgency
+        osc.frequency.exponentialRampToValueAtTime(440, now + 0.04)
+
+        gain.gain.setValueAtTime(0.2, now)
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04)
+
+        osc.connect(gain)
+        gain.connect(ctx.destination)
+        osc.start(now)
+        osc.stop(now + 0.04)
+    } catch {
+        // Audio error fallback
+    }
+}
+
+export const triggerHaptic = (pattern: number | number[] = 40) => {
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try {
+            navigator.vibrate(pattern)
+        } catch {
+            // Haptics fallback
+        }
+    }
+}

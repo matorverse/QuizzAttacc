@@ -40,6 +40,7 @@ export default function GameArena() {
     const [muted, setMuted] = useState(isAudioMuted())
 
     const prefetchedQuestionsRef = useRef<Record<number, Question>>({})
+    const questionOrderRef = useRef<number>(1)
     const eventsChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
     const gameState = useMemo(() => loadGameState(), [])
 
@@ -217,7 +218,7 @@ export default function GameArena() {
                 if (payload.payload?.playerId !== gameState.playerId) {
                     const oppOrder = payload.payload?.questionOrder || 1
                     setOpponentQuestionOrder(oppOrder)
-                    if (oppOrder === questionOrder) {
+                    if (oppOrder === questionOrderRef.current) {
                         setOpponentAnsweredCurrent(true)
                     }
                 }
@@ -243,7 +244,7 @@ export default function GameArena() {
             eventsChannel.unsubscribe()
             document.removeEventListener('visibilitychange', handleVisibilityChange)
         }
-    }, [matchId, questionOrder])
+    }, [matchId])
 
     useEffect(() => {
         if (!waitingForOpponent || !matchId) return
@@ -351,6 +352,7 @@ export default function GameArena() {
 
             setCurrentQuestion(questionToSet)
             setQuestionOrder(order)
+            questionOrderRef.current = order
             setQuestionStartTime(startTimeMs)
             setSelectedAnswer(null)
             setIsCorrect(null)

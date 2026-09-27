@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { saveGameState } from '../lib/gameLogic'
+import { createLocalDuel, subscribeDuelEvents } from '../lib/localDuel'
 
 const TOPICS = ['General Knowledge', 'Science', 'History', 'Pop Culture', 'Sports']
 const DIFFICULTIES = ['easy', 'medium', 'hard'] as const
@@ -139,30 +140,31 @@ export default function CreateRoom() {
         setLoading(true)
 
         try {
-            try {
-                await supabase.auth.signInAnonymously()
-            } catch (e) {
-                console.warn('Auth fallback active')
-            }
+            const tryRemote = async () => {
+                try {
+                    await Promise.race([
+                        supabase.auth.signInAnonymously(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Auth timeout')), 1200))
+                    ])
+                } catch {
+                    // Auth fallback
+                }
 
-            let result: any = null
-
-            try {
-                const { data, error: functionError } = await supabase.functions.invoke('create-room', {
-                    body: formData,
-                })
+                const { data, error: functionError } = await Promise.race([
+                    supabase.functions.invoke('create-room', { body: formData }),
+                    new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Function timeout')), 1500))
+                ])
 
                 if (functionError || !data?.success) {
-                    console.warn('Edge function invoke fallback, using direct client DB:', functionError?.message || data?.error)
-                    result = await createRoomDirectly()
-                } else {
-                    result = data
+                    return await Promise.race([
+                        createRoomDirectly(),
+                        new Promise<any>((_, reject) => setTimeout(() => reject(new Error('DB timeout')), 1500))
+                    ])
                 }
-            } catch (edgeErr) {
-                console.warn('Edge Function unavailable, creating room directly via DB:', edgeErr)
-                result = await createRoomDirectly()
+                return data
             }
 
+            const result = await tryRemote()
             if (!result || !result.success) throw new Error('Failed to create room')
 
             setRoomCode(result.roomCode)
@@ -223,8 +225,36 @@ export default function CreateRoom() {
 
             channelRef.current = channel
         } catch (err: any) {
-            setError(err.message || 'Failed to create room')
-            setLoading(false)
+            console.warn('Remote Supabase table creation failed, hosting in Local Tavern Duel mode:', err.message)
+            try {
+                const localResult = createLocalDuel(formData)
+                setRoomCode(localResult.roomCode)
+                setLoading(false)
+                setError('')
+
+                saveGameState({
+                    matchId: localResult.matchId,
+                    playerId: localResult.playerId,
+                    opponentId: '',
+                    currentQuestionOrder: 1,
+                    totalQuestions: formData.questionCount,
+                    timePerQuestion: formData.timePerQuestion,
+                    topic: formData.topic,
+                    difficulty: formData.difficulty,
+                })
+
+                const unsub = subscribeDuelEvents(localResult.matchId, (event) => {
+                    if (event === 'PLAYER_JOINED') {
+                        unsub()
+                        navigate(`/game/${localResult.matchId}`)
+                    }
+                })
+
+                return
+            } catch (localErr: any) {
+                setError(localErr.message || 'Failed to create room')
+                setLoading(false)
+            }
         }
     }
 
@@ -268,6 +298,7 @@ export default function CreateRoom() {
                             <div>
                                 <label className="block text-sm font-serif font-bold text-parchment-text mb-2">Your Display Name</label>
                                 <input
+                                    id="create-display-name"
                                     type="text"
                                     className="input"
                                     placeholder="Enter display name"
@@ -357,7 +388,7 @@ export default function CreateRoom() {
                                 </div>
                             )}
 
-                            <button type="submit" className="btn-primary w-full" disabled={loading}>
+                            <button id="create-table-btn" type="submit" className="btn-primary w-full" disabled={loading}>
                                 {loading ? 'Preparing Table...' : 'CREATE TABLE'}
                             </button>
                         </form>
@@ -370,7 +401,7 @@ export default function CreateRoom() {
                             </p>
 
                             <div className="wood-panel p-6 rounded-2xl border-2 border-gold/60 my-4 shadow-xl">
-                                <div className="text-4xl font-serif font-bold tracking-widest text-gold-gradient select-all">
+                                <div id="table-code-display" className="text-4xl font-serif font-bold tracking-widest text-gold-gradient select-all">
                                     {roomCode}
                                 </div>
                             </div>

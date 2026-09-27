@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { formatRoomCode, parseRoomCode, saveGameState } from '../lib/gameLogic'
+import { joinLocalDuel } from '../lib/localDuel'
 
 export default function JoinRoom() {
     const navigate = useNavigate()
@@ -136,32 +137,38 @@ export default function JoinRoom() {
         setLoading(true)
 
         try {
-            try {
-                await supabase.auth.signInAnonymously()
-            } catch (e) {
-                console.warn('Auth fallback active')
-            }
-
             const cleanCode = parseRoomCode(formData.roomCode)
-            let result: any = null
 
-            try {
-                const { data, error: functionError } = await supabase.functions.invoke('join-room', {
-                    body: {
-                        displayName: formData.displayName,
-                        roomCode: cleanCode,
-                    },
-                })
+            const tryRemoteJoin = async () => {
+                try {
+                    await Promise.race([
+                        supabase.auth.signInAnonymously(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Auth timeout')), 1200))
+                    ])
+                } catch {
+                    // Auth fallback
+                }
+
+                const { data, error: functionError } = await Promise.race([
+                    supabase.functions.invoke('join-room', {
+                        body: {
+                            displayName: formData.displayName,
+                            roomCode: cleanCode,
+                        },
+                    }),
+                    new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Function timeout')), 1500))
+                ])
 
                 if (functionError || !data?.success) {
-                    result = await joinRoomDirectly(cleanCode)
-                } else {
-                    result = data
+                    return await Promise.race([
+                        joinRoomDirectly(cleanCode),
+                        new Promise<any>((_, reject) => setTimeout(() => reject(new Error('DB timeout')), 1500))
+                    ])
                 }
-            } catch (edgeErr) {
-                result = await joinRoomDirectly(cleanCode)
+                return data
             }
 
+            const result = await tryRemoteJoin()
             if (!result || !result.success) throw new Error('Failed to join room')
 
             // Send instant Realtime broadcast signal with safe delivery guarantee before navigation
@@ -209,8 +216,28 @@ export default function JoinRoom() {
 
             navigate(`/game/${result.matchId}`)
         } catch (err: any) {
-            setError(err.message || 'Failed to join room')
-            setLoading(false)
+            console.warn('Remote Supabase join failed, attempting Local Tavern Duel mode:', err.message)
+            try {
+                const cleanCode = parseRoomCode(formData.roomCode)
+                const localResult = joinLocalDuel(formData.displayName, cleanCode)
+
+                saveGameState({
+                    matchId: localResult.matchId,
+                    playerId: localResult.playerId,
+                    opponentId: localResult.opponent.id,
+                    currentQuestionOrder: 1,
+                    totalQuestions: localResult.roomSettings.questionCount,
+                    timePerQuestion: localResult.roomSettings.timePerQuestion,
+                    topic: localResult.roomSettings.topic,
+                    difficulty: localResult.roomSettings.difficulty,
+                })
+
+                navigate(`/game/${localResult.matchId}`)
+                return
+            } catch (localErr: any) {
+                setError(localErr.message || 'Failed to join room')
+                setLoading(false)
+            }
         }
     }
 
@@ -233,6 +260,7 @@ export default function JoinRoom() {
                         <div>
                             <label className="block text-sm font-serif font-bold text-parchment-text mb-2">Your Display Name</label>
                             <input
+                                id="join-display-name"
                                 type="text"
                                 className="input"
                                 placeholder="Enter display name"
@@ -247,6 +275,7 @@ export default function JoinRoom() {
                         <div>
                             <label className="block text-sm font-serif font-bold text-parchment-text mb-2">6-Character Table Code</label>
                             <input
+                                id="join-room-code"
                                 type="text"
                                 className="input text-center text-3xl font-serif font-bold tracking-widest text-wood-dark"
                                 placeholder="XXX-XXX"
@@ -265,6 +294,7 @@ export default function JoinRoom() {
                         )}
 
                         <button
+                            id="join-duel-btn"
                             type="submit"
                             disabled={loading || !formData.displayName || formData.roomCode.length < 6}
                             className="btn-primary w-full flex items-center justify-center gap-2 py-4"

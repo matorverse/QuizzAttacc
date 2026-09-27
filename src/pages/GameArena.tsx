@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase, Question, MatchScore } from '../lib/supabase'
 import { loadGameState, getStreakText, getPlayerAvatar, decodeHtmlEntities } from '../lib/gameLogic'
 import { playClick, playCorrect, playIncorrect, playStreak, isAudioMuted, toggleAudioMute, triggerHaptic } from '../lib/audio'
+import { getLocalPublicQuestions, getLocalMatch, submitLocalAnswer, forfeitLocalMatch, subscribeDuelEvents, broadcastDuelEvent } from '../lib/localDuel'
 import Timer from '../components/Timer'
 import ScoreBoard from '../components/ScoreBoard'
 import ConnectionStatus from '../components/ConnectionStatus'
@@ -57,8 +58,56 @@ export default function GameArena() {
 
         let isMounted = true
 
+        // If local duel match
+        if (matchId.startsWith('match-')) {
+            setConnectionState('connected')
+            const qList = getLocalPublicQuestions(matchId)
+            if (qList && isMounted) {
+                qList.forEach((item) => {
+                    // @ts-ignore
+                    prefetchedQuestionsRef.current[item.question_order] = item.questions
+                })
+            }
+
+            const lMatch = getLocalMatch(matchId)
+            if (lMatch && isMounted) {
+                setTotalQuestions(lMatch.questions.length)
+                if (lMatch.player1_id === gameState.playerId) {
+                    setMyPlayerName(lMatch.player1_name)
+                    setOpponentPlayerName(lMatch.player2_name || 'Opponent')
+                } else {
+                    setMyPlayerName(lMatch.player2_name || 'Guest')
+                    setOpponentPlayerName(lMatch.player1_name)
+                }
+            }
+
+            // Subscribe to local duel events
+            const unsub = subscribeDuelEvents(matchId, (event, payload) => {
+                if (!isMounted) return
+                if (event === 'PLAYER_ANSWERED' && payload.playerId !== gameState.playerId) {
+                    setOpponentQuestionOrder(payload.questionOrder || 1)
+                    if (payload.questionOrder === questionOrderRef.current) {
+                        setOpponentAnsweredCurrent(true)
+                    }
+                } else if (event === 'SCORE_UPDATED' && payload.playerId !== gameState.playerId) {
+                    setOpponentScore((prev) => prev + (payload.totalPoints || 0))
+                    setOpponentStreak(payload.currentStreak || 0)
+                } else if (event === 'MATCH_FINISHED') {
+                    navigate(`/results/${matchId}`)
+                }
+            })
+
+            loadQuestion(1)
+
+            return () => {
+                isMounted = false
+                unsub()
+            }
+        }
+
         const initializeArena = async () => {
             try {
+
                 // Zero-knowledge question retrieval: strictly omit correct_answer_index and explanation
                 const { data: mqList } = await supabase
                     .from('match_questions')
@@ -254,6 +303,14 @@ export default function GameArena() {
 
         let isSubscribed = true
         const checkStatus = async () => {
+            if (matchId.startsWith('match-')) {
+                const lMatch = getLocalMatch(matchId)
+                if (isSubscribed && lMatch && lMatch.status === 'finished') {
+                    navigate(`/results/${matchId}`)
+                }
+                return
+            }
+
             const { data } = await supabase
                 .from('matches')
                 .select('status')
@@ -266,7 +323,7 @@ export default function GameArena() {
         }
 
         checkStatus()
-        const statusInterval = setInterval(checkStatus, 2500)
+        const statusInterval = setInterval(checkStatus, 1500)
 
         // 30s countdown for forfeit option
         const countdownInterval = setInterval(() => {
@@ -409,21 +466,35 @@ export default function GameArena() {
         // Server-authoritative answer submission & verification
         let serverResult: any = null
 
-        // 1. Try atomic database RPC first
-        try {
-            const { data: rpcData, error: rpcErr } = await supabase.rpc('submit_player_answer', {
-                p_match_id: matchId,
-                p_player_id: gameState?.playerId,
-                p_question_id: currentQuestion.id,
-                p_selected_answer_index: answerIndex,
-                p_time_taken_ms: timeTaken,
+        // 0. If local tavern duel
+        if (matchId?.startsWith('match-')) {
+            broadcastDuelEvent(matchId, 'PLAYER_ANSWERED', { playerId: gameState?.playerId, questionOrder })
+            serverResult = submitLocalAnswer({
+                matchId,
+                playerId: gameState?.playerId || '',
+                questionId: currentQuestion.id,
+                selectedAnswerIndex: answerIndex,
+                timeTakenMs: timeTaken,
             })
+        }
 
-            if (!rpcErr && rpcData && rpcData.success) {
-                serverResult = rpcData
+        // 1. Try atomic database RPC first
+        if (!serverResult) {
+            try {
+                const { data: rpcData, error: rpcErr } = await supabase.rpc('submit_player_answer', {
+                    p_match_id: matchId,
+                    p_player_id: gameState?.playerId,
+                    p_question_id: currentQuestion.id,
+                    p_selected_answer_index: answerIndex,
+                    p_time_taken_ms: timeTaken,
+                })
+
+                if (!rpcErr && rpcData && rpcData.success) {
+                    serverResult = rpcData
+                }
+            } catch (rpcEx) {
+                console.warn('Direct RPC submit failed, calling edge function:', rpcEx)
             }
-        } catch (rpcEx) {
-            console.warn('Direct RPC submit failed, calling edge function:', rpcEx)
         }
 
         // 2. Fallback to Edge Function
@@ -455,6 +526,11 @@ export default function GameArena() {
         setIsCorrect(isAnsCorrect)
         setCorrectAnswerIndex(verifiedCorrectIndex)
         setShowFeedback(true)
+
+        if (matchId?.startsWith('match-') && verifiedScore) {
+            setMyScore((prev) => prev + (verifiedScore.totalPoints || 0))
+            setMyStreak(verifiedScore.currentStreak || 0)
+        }
 
         if (isAnsCorrect) {
             triggerHaptic([40, 40])
@@ -502,6 +578,11 @@ export default function GameArena() {
     const handleClaimForfeit = async () => {
         try {
             setLoading(true)
+            if (matchId?.startsWith('match-')) {
+                forfeitLocalMatch(matchId, gameState?.playerId || '')
+                navigate(`/results/${matchId}`)
+                return
+            }
             await supabase.rpc('forfeit_match', {
                 p_match_id: matchId,
                 p_player_id: gameState?.playerId,
@@ -680,6 +761,7 @@ export default function GameArena() {
                             return (
                                 <button
                                     key={index}
+                                    id={`arena-option-${index}`}
                                     onClick={() => handleAnswerSelect(index)}
                                     disabled={submitting || showFeedback}
                                     className={buttonClass}

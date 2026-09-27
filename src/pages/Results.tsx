@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase, MatchSummary, Player } from '../lib/supabase'
 import { getPersistentPlayerId } from '../lib/gameLogic'
+import { getLocalMatch } from '../lib/localDuel'
 
 export default function Results() {
     const { matchId } = useParams<{ matchId: string }>()
@@ -22,6 +23,62 @@ export default function Results() {
 
     const computeDynamicSummary = async (): Promise<MatchSummary | null> => {
         try {
+            if (matchId?.startsWith('match-')) {
+                const lMatch = getLocalMatch(matchId)
+                if (lMatch) {
+                    let p1Score = 0, p2Score = 0, p1Correct = 0, p2Correct = 0, p1TimeSum = 0, p2TimeSum = 0
+                    Object.values(lMatch.p1_scores).forEach((s: any) => { p1Score += (s.totalPoints || 0) })
+                    Object.values(lMatch.p2_scores).forEach((s: any) => { p2Score += (s.totalPoints || 0) })
+                    Object.values(lMatch.p1_answers).forEach((a: any) => {
+                        if (a.isCorrect) p1Correct++
+                        p1TimeSum += (a.timeTakenMs || 0)
+                    })
+                    Object.values(lMatch.p2_answers).forEach((a: any) => {
+                        if (a.isCorrect) p2Correct++
+                        p2TimeSum += (a.timeTakenMs || 0)
+                    })
+
+                    const p1Total = Object.keys(lMatch.p1_answers).length
+                    const p2Total = Object.keys(lMatch.p2_answers).length
+                    const p1Avg = p1Total > 0 ? Math.round(p1TimeSum / p1Total) : 0
+                    const p2Avg = p2Total > 0 ? Math.round(p2TimeSum / p2Total) : 0
+                    const p1Acc = p1Total > 0 ? Math.round((p1Correct / p1Total) * 100) : 0
+                    const p2Acc = p2Total > 0 ? Math.round((p2Correct / p2Total) * 100) : 0
+
+                    let winnerId: string | undefined = undefined
+                    if (p1Score > p2Score) winnerId = lMatch.player1_id
+                    else if (p2Score > p1Score) winnerId = lMatch.player2_id
+                    else if (p1Avg < p2Avg && p1Avg > 0) winnerId = lMatch.player1_id
+                    else if (p2Avg < p1Avg && p2Avg > 0) winnerId = lMatch.player2_id
+
+                    setPlayer1({ id: lMatch.player1_id, display_name: lMatch.player1_name, created_at: '', updated_at: '' })
+                    setPlayer2({ id: lMatch.player2_id || '', display_name: lMatch.player2_name || 'Guest', created_at: '', updated_at: '' })
+
+                    sessionStorage.setItem('quizexe_rematch_preset', JSON.stringify({
+                        topic: lMatch.questions[0]?.topic || 'General Knowledge',
+                        difficulty: lMatch.questions[0]?.difficulty || 'medium',
+                        questionCount: lMatch.questions.length,
+                        timePerQuestion: 15,
+                    }))
+
+                    return {
+                        id: `local-${matchId}`,
+                        match_id: matchId,
+                        winner_id: winnerId,
+                        player1_id: lMatch.player1_id,
+                        player2_id: lMatch.player2_id || '',
+                        player1_score: p1Score,
+                        player2_score: p2Score,
+                        player1_accuracy: p1Acc,
+                        player2_accuracy: p2Acc,
+                        player1_avg_time_ms: p1Avg,
+                        player2_avg_time_ms: p2Avg,
+                        total_duration_seconds: 35,
+                        created_at: new Date().toISOString(),
+                    }
+                }
+            }
+
             const { data: matchData } = await supabase
                 .from('matches')
                 .select('*, rooms(*)')
@@ -115,31 +172,35 @@ export default function Results() {
         try {
             let summaryData: MatchSummary | null = null
 
-            // Try loading pre-generated match summary
-            const { data, error: summaryError } = await supabase
-                .from('match_summaries')
-                .select('*')
-                .eq('match_id', matchId!)
-                .single()
-
-            if (!summaryError && data) {
-                summaryData = data
-            } else {
+            if (matchId?.startsWith('match-')) {
                 summaryData = await computeDynamicSummary()
-            }
-
-            if (!summaryData) {
-                // Short wait retry if DB trigger was slightly delayed
-                await new Promise((resolve) => setTimeout(resolve, 800))
-                const { data: retryData } = await supabase
+            } else {
+                // Try loading pre-generated match summary
+                const { data, error: summaryError } = await supabase
                     .from('match_summaries')
                     .select('*')
                     .eq('match_id', matchId!)
                     .single()
-                if (retryData) {
-                    summaryData = retryData
+
+                if (!summaryError && data) {
+                    summaryData = data
                 } else {
                     summaryData = await computeDynamicSummary()
+                }
+
+                if (!summaryData) {
+                    // Short wait retry if DB trigger was slightly delayed
+                    await new Promise((resolve) => setTimeout(resolve, 800))
+                    const { data: retryData } = await supabase
+                        .from('match_summaries')
+                        .select('*')
+                        .eq('match_id', matchId!)
+                        .single()
+                    if (retryData) {
+                        summaryData = retryData
+                    } else {
+                        summaryData = await computeDynamicSummary()
+                    }
                 }
             }
 
@@ -147,7 +208,7 @@ export default function Results() {
                 setSummary(summaryData)
 
                 const playerIds = [summaryData.player1_id, summaryData.player2_id].filter(Boolean)
-                if (playerIds.length > 0) {
+                if (playerIds.length > 0 && !matchId?.startsWith('match-')) {
                     const { data: players } = await supabase
                         .from('players')
                         .select('*')
@@ -304,6 +365,7 @@ export default function Results() {
                 {/* Actions */}
                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
                     <button
+                        id="instant-rematch-btn"
                         onClick={handleRematch}
                         className="btn-primary flex items-center justify-center gap-2"
                     >
@@ -316,6 +378,7 @@ export default function Results() {
                         🔄 Host New Table
                     </button>
                     <button
+                        id="return-hall-btn"
                         onClick={() => navigate('/')}
                         className="btn-secondary flex items-center justify-center gap-2"
                     >

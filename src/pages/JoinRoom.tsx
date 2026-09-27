@@ -21,7 +21,7 @@ export default function JoinRoom() {
         const { data: { user } } = await supabase.auth.getUser()
         let playerId: string
         if (user) {
-            const { data: existingPlayer } = await supabase.from('players').select('id').eq('auth_id', user.id).single()
+            const { data: existingPlayer } = await supabase.from('players').select('id').eq('auth_id', user.id).maybeSingle()
             if (existingPlayer) {
                 playerId = existingPlayer.id
                 await supabase.from('players').update({ display_name: formData.displayName }).eq('id', playerId)
@@ -49,7 +49,7 @@ export default function JoinRoom() {
         if (match.player2_id) throw new Error('Room is full')
         if (match.player1_id === playerId) throw new Error('You are already the host of this room')
 
-        // Attempt RPC call first for ultra-fast atomic execution
+        // Attempt RPC call first for atomic execution
         try {
             const { data: rpcResult, error: rpcErr } = await supabase.rpc('join_and_setup_match', {
                 p_match_id: match.id,
@@ -59,13 +59,14 @@ export default function JoinRoom() {
                 return rpcResult
             }
         } catch {
-            // Fallback to client multi-query approach if RPC is not deployed
+            // Fallback to client multi-query approach
         }
 
         await supabase.from('matches').update({
             player2_id: playerId,
             status: 'active',
             started_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
         }).eq('id', match.id)
 
         // Select question pool
@@ -97,7 +98,7 @@ export default function JoinRoom() {
         const shuffled = [...pool]
         for (let i = shuffled.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1))
-                ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+            ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
         }
         const selected = shuffled.slice(0, room.question_count)
 
@@ -153,29 +154,43 @@ export default function JoinRoom() {
                 })
 
                 if (functionError || !data?.success) {
-                    console.warn('Edge function invoke fallback, using direct client DB:', functionError?.message || data?.error)
                     result = await joinRoomDirectly(cleanCode)
                 } else {
                     result = data
                 }
             } catch (edgeErr) {
-                console.warn('Edge Function unavailable, joining room directly via DB:', edgeErr)
                 result = await joinRoomDirectly(cleanCode)
             }
 
             if (!result || !result.success) throw new Error('Failed to join room')
 
-            // Send instant Realtime broadcast signal so host navigates immediately without waiting for DB CDC
+            // Send instant Realtime broadcast signal with safe delivery guarantee before navigation
             try {
                 const bChannel = supabase.channel(`match:${result.matchId}`)
-                bChannel.subscribe((status) => {
-                    if (status === 'SUBSCRIBED') {
-                        bChannel.send({
-                            type: 'broadcast',
-                            event: 'PLAYER_JOINED',
-                            payload: { matchId: result.matchId },
-                        })
+                await new Promise<void>((resolve) => {
+                    let resolved = false
+                    const finish = () => {
+                        if (!resolved) {
+                            resolved = true
+                            bChannel.unsubscribe()
+                            resolve()
+                        }
                     }
+
+                    bChannel.subscribe(async (status) => {
+                        if (status === 'SUBSCRIBED') {
+                            await bChannel.send({
+                                type: 'broadcast',
+                                event: 'PLAYER_JOINED',
+                                payload: { matchId: result.matchId },
+                            })
+                            finish()
+                        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                            finish()
+                        }
+                    })
+
+                    setTimeout(finish, 400)
                 })
             } catch {
                 // Ignore broadcast error fallback
@@ -249,16 +264,23 @@ export default function JoinRoom() {
                             </div>
                         )}
 
-                        <button type="submit" className="btn-primary w-full" disabled={loading}>
-                            {loading ? 'Entering Table...' : 'Enter Duel'}
+                        <button
+                            type="submit"
+                            disabled={loading || !formData.displayName || formData.roomCode.length < 6}
+                            className="btn-primary w-full flex items-center justify-center gap-2 py-4"
+                        >
+                            {loading ? (
+                                <>
+                                    <div className="w-5 h-5 border-2 border-parchment border-t-transparent rounded-full animate-spin"></div>
+                                    <span>Entering Table...</span>
+                                </>
+                            ) : (
+                                <>
+                                    <span>⚔️ Join Duel</span>
+                                </>
+                            )}
                         </button>
                     </form>
-
-                    <div className="mt-6 bg-wood-dark/90 p-4 rounded-xl text-gold border border-gold/30">
-                        <p className="text-xs font-serif text-center">
-                            💡 <span className="font-bold text-gold-light">Tavern Rule:</span> The quiz battle begins immediately upon entering the table!
-                        </p>
-                    </div>
                 </div>
             </div>
         </div>

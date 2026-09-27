@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase, MatchSummary, Player } from '../lib/supabase'
-import { clearGameState } from '../lib/gameLogic'
+import { getPersistentPlayerId } from '../lib/gameLogic'
 
 export default function Results() {
     const { matchId } = useParams<{ matchId: string }>()
@@ -13,18 +13,18 @@ export default function Results() {
     const [isWinner, setIsWinner] = useState(false)
 
     useEffect(() => {
-        const init = async () => {
-            await loadResults()
-            clearGameState()
+        if (!matchId) {
+            navigate('/')
+            return
         }
-        init()
+        loadResults()
     }, [matchId])
 
     const computeDynamicSummary = async (): Promise<MatchSummary | null> => {
         try {
             const { data: matchData } = await supabase
                 .from('matches')
-                .select('*')
+                .select('*, rooms(*)')
                 .eq('id', matchId!)
                 .single()
 
@@ -48,22 +48,22 @@ export default function Results() {
             let p1Total = 0, p2Total = 0
             let p1TimeSum = 0, p2TimeSum = 0
 
-                ; (scores || []).forEach((s) => {
-                    if (s.player_id === p1Id) p1Score += s.total_points
-                    else if (s.player_id === p2Id) p2Score += s.total_points
-                })
+            ;(scores || []).forEach((s) => {
+                if (s.player_id === p1Id) p1Score += s.total_points
+                else if (s.player_id === p2Id) p2Score += s.total_points
+            })
 
-                ; (answers || []).forEach((a) => {
-                    if (a.player_id === p1Id) {
-                        p1Total++
-                        p1TimeSum += a.time_taken_ms
-                        if (a.is_correct) p1Correct++
-                    } else if (a.player_id === p2Id) {
-                        p2Total++
-                        p2TimeSum += a.time_taken_ms
-                        if (a.is_correct) p2Correct++
-                    }
-                })
+            ;(answers || []).forEach((a) => {
+                if (a.player_id === p1Id) {
+                    p1Total++
+                    p1TimeSum += a.time_taken_ms
+                    if (a.is_correct) p1Correct++
+                } else if (a.player_id === p2Id) {
+                    p2Total++
+                    p2TimeSum += a.time_taken_ms
+                    if (a.is_correct) p2Correct++
+                }
+            })
 
             const p1AvgTime = p1Total > 0 ? Math.round(p1TimeSum / p1Total) : 0
             const p2AvgTime = p2Total > 0 ? Math.round(p2TimeSum / p2Total) : 0
@@ -79,6 +79,16 @@ export default function Results() {
             const startTime = matchData.started_at ? new Date(matchData.started_at).getTime() : Date.now()
             const finishTime = matchData.finished_at ? new Date(matchData.finished_at).getTime() : Date.now()
             const duration = Math.max(1, Math.round((finishTime - startTime) / 1000))
+
+            // Save rematch preset from room settings
+            if (matchData.rooms) {
+                sessionStorage.setItem('quizexe_rematch_preset', JSON.stringify({
+                    topic: matchData.rooms.topic,
+                    difficulty: matchData.rooms.difficulty,
+                    questionCount: matchData.rooms.question_count,
+                    timePerQuestion: matchData.rooms.time_per_question,
+                }))
+            }
 
             return {
                 id: `dynamic-${matchId}`,
@@ -115,7 +125,6 @@ export default function Results() {
             if (!summaryError && data) {
                 summaryData = data
             } else {
-                // Compute dynamically from player scores and answers
                 summaryData = await computeDynamicSummary()
             }
 
@@ -152,17 +161,23 @@ export default function Results() {
                     }
                 }
 
-                const savedState = localStorage.getItem('quizexe_game_state')
-                if (savedState) {
+                // Check winner status using persistent player identity
+                const persistentId = getPersistentPlayerId()
+                let myId = persistentId
+
+                const savedStateStr = localStorage.getItem('quizexe_game_state')
+                if (savedStateStr) {
                     try {
-                        const state = JSON.parse(savedState)
-                        const winner = summaryData.winner_id === state.playerId
-                        setIsWinner(winner)
-                        if (winner) {
-                            import('../lib/audio').then((m) => m.playVictory()).catch(() => { })
-                        }
-                    } catch {
-                        // ignore parse error
+                        const state = JSON.parse(savedStateStr)
+                        if (state.playerId) myId = state.playerId
+                    } catch {}
+                }
+
+                if (myId && summaryData.winner_id) {
+                    const won = summaryData.winner_id === myId
+                    setIsWinner(won)
+                    if (won) {
+                        import('../lib/audio').then((m) => m.playVictory()).catch(() => {})
                     }
                 }
             }
@@ -174,35 +189,7 @@ export default function Results() {
     }
 
     const handleRematch = () => {
-        try {
-            const savedStateStr = localStorage.getItem('quizexe_game_state')
-            let topic = 'General Knowledge'
-            let difficulty = 'medium'
-            let questionCount = 10
-            let timePerQuestion = 15
-
-            if (savedStateStr) {
-                try {
-                    const st = JSON.parse(savedStateStr)
-                    if (st.topic) topic = st.topic
-                    if (st.difficulty) difficulty = st.difficulty
-                    if (st.totalQuestions) questionCount = st.totalQuestions
-                    if (st.timePerQuestion) timePerQuestion = st.timePerQuestion
-                } catch {
-                    // ignore
-                }
-            }
-
-            sessionStorage.setItem('quizexe_rematch_preset', JSON.stringify({
-                topic,
-                difficulty,
-                questionCount,
-                timePerQuestion,
-            }))
-            navigate('/create')
-        } catch {
-            navigate('/create')
-        }
+        navigate('/create')
     }
 
     if (loading || !summary) {
@@ -256,9 +243,9 @@ export default function Results() {
                     <div className={`card-parchment ${summary.winner_id === summary.player1_id ? 'border-2 border-gold ring-2 ring-gold/40' : ''}`}>
                         <div className="text-center">
                             <div className="w-16 h-16 bg-wood-medium text-gold border-2 border-gold/50 rounded-full flex items-center justify-center text-2xl font-serif font-bold mx-auto mb-3 shadow-md">
-                                {player1?.display_name.slice(0, 2).toUpperCase()}
+                                {player1?.display_name ? player1.display_name.slice(0, 2).toUpperCase() : 'P1'}
                             </div>
-                            <h3 className="text-xl font-serif font-bold mb-1 text-parchment-text">{player1?.display_name}</h3>
+                            <h3 className="text-xl font-serif font-bold mb-1 text-parchment-text">{player1?.display_name || 'Host'}</h3>
                             <div className="text-4xl font-serif font-bold text-wood-dark mb-4">
                                 {summary.player1_score.toLocaleString()}
                             </div>
@@ -273,9 +260,9 @@ export default function Results() {
                     <div className={`card-parchment ${summary.winner_id === summary.player2_id ? 'border-2 border-gold ring-2 ring-gold/40' : ''}`}>
                         <div className="text-center">
                             <div className="w-16 h-16 bg-wood-medium text-gold border-2 border-gold/50 rounded-full flex items-center justify-center text-2xl font-serif font-bold mx-auto mb-3 shadow-md">
-                                {player2?.display_name.slice(0, 2).toUpperCase()}
+                                {player2?.display_name ? player2.display_name.slice(0, 2).toUpperCase() : 'P2'}
                             </div>
-                            <h3 className="text-xl font-serif font-bold mb-1 text-parchment-text">{player2?.display_name}</h3>
+                            <h3 className="text-xl font-serif font-bold mb-1 text-parchment-text">{player2?.display_name || 'Guest'}</h3>
                             <div className="text-4xl font-serif font-bold text-wood-dark mb-4">
                                 {summary.player2_score.toLocaleString()}
                             </div>

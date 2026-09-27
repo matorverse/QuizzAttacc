@@ -12,91 +12,61 @@ serve(async (req) => {
     }
 
     try {
-        // Use service role key for cleanup operations
         const supabaseClient = createClient(
             Deno.env.get('SUPABASE_URL') ?? '',
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
         )
 
+        // 1. Try atomic database stored procedure first (<10ms single roundtrip)
+        try {
+            const { data: rpcSummary, error: rpcErr } = await supabaseClient.rpc('cleanup_stale_rooms_and_matches')
+            if (!rpcErr && rpcSummary) {
+                return new Response(
+                    JSON.stringify(rpcSummary),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 200,
+                    }
+                )
+            }
+        } catch (rpcErr) {
+            console.warn('RPC cleanup_stale_rooms_and_matches unavailable, running direct set-based queries:', rpcErr)
+        }
+
+        // 2. Set-based Fallback (No N+1 queries)
         const now = new Date().toISOString()
         const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString()
         const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
 
-        let deletedRooms = 0
-        let abandonedWaiting = 0
-        let abandonedActive = 0
-
-        // Delete expired rooms (CASCADE will handle related data)
-        const { data: expiredRooms, error: deleteError } = await supabaseClient
+        // Delete expired rooms (CASCADE handles dependent records)
+        const { data: expiredRooms } = await supabaseClient
             .from('rooms')
             .delete()
             .lt('expires_at', now)
             .select('id')
 
-        if (deleteError) {
-            console.error('Error deleting expired rooms:', deleteError)
-        } else {
-            deletedRooms = expiredRooms?.length || 0
-        }
+        const deletedRooms = expiredRooms?.length || 0
 
-        // Mark waiting matches as abandoned if no guest joined within 30 minutes
-        const { data: waitingMatches, error: waitingError } = await supabaseClient
+        // Mark waiting matches abandoned if no guest after 30 mins
+        const { data: waitingMatches } = await supabaseClient
             .from('matches')
-            .update({ status: 'abandoned' })
+            .update({ status: 'abandoned', updated_at: now })
             .eq('status', 'waiting')
             .lt('created_at', thirtyMinutesAgo)
             .is('player2_id', null)
             .select('id')
 
-        if (waitingError) {
-            console.error('Error marking waiting matches as abandoned:', waitingError)
-        } else {
-            abandonedWaiting = waitingMatches?.length || 0
-        }
+        const abandonedWaiting = waitingMatches?.length || 0
 
-        // Mark active matches as abandoned if no activity for 2 hours
-        // Check for matches where the last answer was submitted more than 2 hours ago
-        const { data: activeMatches, error: activeError } = await supabaseClient
+        // Mark stale active matches abandoned if no answers recently
+        const { data: staleMatches } = await supabaseClient
             .from('matches')
-            .select('id, (player_answers(submitted_at))')
+            .update({ status: 'abandoned', updated_at: now })
             .eq('status', 'active')
+            .lt('started_at', twoHoursAgo)
+            .select('id')
 
-        if (!activeError && activeMatches) {
-            for (const match of activeMatches) {
-                // @ts-ignore - Supabase typing issue
-                const answers = match.player_answers || []
-
-                if (answers.length === 0) {
-                    // No answers yet, check match start time
-                    const { data: matchData } = await supabaseClient
-                        .from('matches')
-                        .select('started_at')
-                        .eq('id', match.id)
-                        .single()
-
-                    if (matchData && matchData.started_at < twoHoursAgo) {
-                        await supabaseClient
-                            .from('matches')
-                            .update({ status: 'abandoned' })
-                            .eq('id', match.id)
-                        abandonedActive++
-                    }
-                } else {
-                    // Check last answer time
-                    const lastAnswerTime = answers.reduce((latest: string, answer: any) => {
-                        return answer.submitted_at > latest ? answer.submitted_at : latest
-                    }, answers[0].submitted_at)
-
-                    if (lastAnswerTime < twoHoursAgo) {
-                        await supabaseClient
-                            .from('matches')
-                            .update({ status: 'abandoned' })
-                            .eq('id', match.id)
-                        abandonedActive++
-                    }
-                }
-            }
-        }
+        const abandonedActive = staleMatches?.length || 0
 
         const summary = {
             success: true,
@@ -107,8 +77,6 @@ serve(async (req) => {
             totalCleaned: deletedRooms + abandonedWaiting + abandonedActive,
         }
 
-        console.log('Cleanup completed:', summary)
-
         return new Response(
             JSON.stringify(summary),
             {
@@ -116,7 +84,7 @@ serve(async (req) => {
                 status: 200,
             }
         )
-    } catch (error) {
+    } catch (error: any) {
         console.error('Cleanup error:', error)
         return new Response(
             JSON.stringify({

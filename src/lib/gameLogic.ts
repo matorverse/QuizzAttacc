@@ -1,4 +1,4 @@
-// Game state management utilities
+// Game state management and utility functions for QuizzAttacc
 
 export interface GameState {
     matchId: string
@@ -13,6 +13,10 @@ export interface GameState {
 
 export const saveGameState = (state: GameState) => {
     localStorage.setItem('quizexe_game_state', JSON.stringify(state))
+    // Also save persistent player ID so results and rematches survive state resets
+    if (state.playerId) {
+        localStorage.setItem('quizexe_persistent_player_id', state.playerId)
+    }
 }
 
 export const loadGameState = (): GameState | null => {
@@ -20,8 +24,44 @@ export const loadGameState = (): GameState | null => {
     return saved ? JSON.parse(saved) : null
 }
 
+export const getPersistentPlayerId = (): string | null => {
+    return localStorage.getItem('quizexe_persistent_player_id')
+}
+
 export const clearGameState = () => {
     localStorage.removeItem('quizexe_game_state')
+}
+
+// Robust HTML entity decoder for OpenTDB trivia questions
+export const decodeHtmlEntities = (text: string): string => {
+    if (!text) return ''
+    return text
+        .replace(/&quot;/g, '"')
+        .replace(/&#039;/g, "'")
+        .replace(/&#39;/g, "'")
+        .replace(/&#x27;/g, "'")
+        .replace(/&apos;/g, "'")
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&deg;/g, '°')
+        .replace(/&eacute;/g, 'é')
+        .replace(/&egrave;/g, 'è')
+        .replace(/&aacute;/g, 'á')
+        .replace(/&ntilde;/g, 'ñ')
+        .replace(/&oacute;/g, 'ó')
+        .replace(/&uuml;/g, 'ü')
+        .replace(/&ouml;/g, 'ö')
+        .replace(/&auml;/g, 'ä')
+        .replace(/&shy;/g, '')
+        .replace(/&hellip;/g, '…')
+        .replace(/&rsquo;/g, "'")
+        .replace(/&lsquo;/g, "'")
+        .replace(/&rdquo;/g, '"')
+        .replace(/&ldquo;/g, '"')
+        .replace(/&ndash;/g, '–')
+        .replace(/&mdash;/g, '—')
+        .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(dec))
 }
 
 // Timer utilities

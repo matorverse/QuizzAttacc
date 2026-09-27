@@ -6,22 +6,18 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// Latency compensation buffer (200ms grace period)
-const LATENCY_BUFFER_MS = 200
-
 serve(async (req) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
     }
 
     try {
-        // Use service role key for server-authoritative operations
         const supabaseClient = createClient(
             Deno.env.get('SUPABASE_URL') ?? '',
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
         )
 
-        const { matchId, playerId, questionId, selectedAnswerIndex, timeTakenMs, submittedAt } = await req.json()
+        const { matchId, playerId, questionId, selectedAnswerIndex, timeTakenMs } = await req.json()
 
         // Validate inputs
         if (!matchId || !playerId || !questionId) {
@@ -32,11 +28,32 @@ serve(async (req) => {
             throw new Error('Invalid answer index')
         }
 
-        if (timeTakenMs < 0) {
-            throw new Error('Invalid time taken')
+        const safeTimeTaken = typeof timeTakenMs === 'number' && timeTakenMs >= 0 ? timeTakenMs : 0
+
+        // 1. First attempt: Atomic stored procedure execution
+        try {
+            const { data: rpcData, error: rpcError } = await supabaseClient.rpc('submit_player_answer', {
+                p_match_id: matchId,
+                p_player_id: playerId,
+                p_question_id: questionId,
+                p_selected_answer_index: selectedAnswerIndex,
+                p_time_taken_ms: safeTimeTaken,
+            })
+
+            if (!rpcError && rpcData && rpcData.success) {
+                return new Response(
+                    JSON.stringify(rpcData),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 200,
+                    }
+                )
+            }
+        } catch (rpcErr) {
+            console.warn('RPC submit_player_answer unavailable, falling back to service_role direct processing:', rpcErr)
         }
 
-        // Get match details
+        // 2. Direct Fallback using Service Role Key
         const { data: match, error: matchError } = await supabaseClient
             .from('matches')
             .select('*, rooms(*)')
@@ -47,39 +64,15 @@ serve(async (req) => {
             throw new Error('Match not found')
         }
 
-        // Verify match is active
         if (match.status !== 'active') {
             throw new Error('Match is not active')
         }
 
-        // Verify player is in this match
         if (match.player1_id !== playerId && match.player2_id !== playerId) {
             throw new Error('Player not in this match')
         }
 
-        // Get match question details
-        const { data: matchQuestion, error: mqError } = await supabaseClient
-            .from('match_questions')
-            .select('*')
-            .eq('match_id', matchId)
-            .eq('question_id', questionId)
-            .single()
-
-        if (mqError || !matchQuestion) {
-            throw new Error('Question not found in this match')
-        }
-
-        // Time validation with latency buffer
-        const questionStartTime = new Date(matchQuestion.started_at || match.started_at).getTime()
-        const timeLimit = match.rooms.time_per_question * 1000 // Convert to ms
-        const deadline = questionStartTime + timeLimit + LATENCY_BUFFER_MS
-        const submissionTime = new Date(submittedAt).getTime()
-
-        if (submissionTime > deadline) {
-            throw new Error('Answer submitted too late')
-        }
-
-        // Check for duplicate answer (anti-cheat)
+        // Check for duplicate answer
         const { data: existingAnswer } = await supabaseClient
             .from('player_answers')
             .select('id')
@@ -92,10 +85,10 @@ serve(async (req) => {
             throw new Error('Answer already submitted for this question')
         }
 
-        // Get correct answer
+        // Get correct answer from database
         const { data: question, error: questionError } = await supabaseClient
             .from('questions')
-            .select('correct_answer_index')
+            .select('correct_answer_index, explanation')
             .eq('id', questionId)
             .single()
 
@@ -103,7 +96,8 @@ serve(async (req) => {
             throw new Error('Question not found')
         }
 
-        const isCorrect = selectedAnswerIndex === question.correct_answer_index
+        const isCorrect = selectedAnswerIndex >= 0 && selectedAnswerIndex === question.correct_answer_index
+        const timeLimit = (match.rooms?.time_per_question || 15) * 1000
 
         // Store answer in audit log
         const { error: answerError } = await supabaseClient
@@ -114,13 +108,13 @@ serve(async (req) => {
                 question_id: questionId,
                 selected_answer_index: selectedAnswerIndex,
                 is_correct: isCorrect,
-                time_taken_ms: timeTakenMs,
-                submitted_at: submittedAt,
+                time_taken_ms: safeTimeTaken,
+                submitted_at: new Date().toISOString(),
             })
 
         if (answerError) throw answerError
 
-        // Calculate score if correct
+        // Calculate score
         let totalPoints = 0
         let basePoints = 0
         let timeBonus = 0
@@ -129,13 +123,10 @@ serve(async (req) => {
 
         if (isCorrect) {
             basePoints = 100
-
-            // Time bonus: Linear decay from 50 to 0
-            const timeLimitMs = timeLimit
-            const timeBonusRatio = Math.max(0, (timeLimitMs - timeTakenMs) / timeLimitMs)
+            const clampedTime = Math.max(0, Math.min(safeTimeTaken, timeLimit))
+            const timeBonusRatio = Math.max(0, (timeLimit - clampedTime) / timeLimit)
             timeBonus = Math.round(timeBonusRatio * 50)
 
-            // Get current streak
             const { data: previousScores } = await supabaseClient
                 .from('match_scores')
                 .select('current_streak')
@@ -150,22 +141,14 @@ serve(async (req) => {
                 currentStreak = 1
             }
 
-            // Streak multiplier
-            if (currentStreak === 1) {
-                streakMultiplier = 1.0
-            } else if (currentStreak === 2) {
-                streakMultiplier = 1.1
-            } else {
-                streakMultiplier = 1.3 // Capped at 3+
-            }
+            if (currentStreak === 1) streakMultiplier = 1.0
+            else if (currentStreak === 2) streakMultiplier = 1.1
+            else streakMultiplier = 1.3
 
             totalPoints = Math.round((basePoints + timeBonus) * streakMultiplier)
-        } else {
-            // Reset streak on incorrect answer
-            currentStreak = 0
         }
 
-        // Store score
+        // Store authoritative score
         const { error: scoreError } = await supabaseClient
             .from('match_scores')
             .insert({
@@ -192,33 +175,21 @@ serve(async (req) => {
             .select('id')
             .eq('match_id', matchId)
 
-        const expectedAnswers = (totalQuestions?.length || 0) * 2 // Both players
+        const expectedAnswers = (totalQuestions?.length || 0) * 2
         const actualAnswers = totalAnswers?.length || 0
 
         let matchComplete = false
-
         if (actualAnswers >= expectedAnswers) {
-            // Mark match as finished
             await supabaseClient
                 .from('matches')
                 .update({
                     status: 'finished',
                     finished_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
                 })
                 .eq('id', matchId)
 
             matchComplete = true
-        }
-
-        // Update next question's started_at if exists
-        if (!matchComplete) {
-            const nextOrder = matchQuestion.question_order + 1
-            await supabaseClient
-                .from('match_questions')
-                .update({ started_at: new Date().toISOString() })
-                .eq('match_id', matchId)
-                .eq('question_order', nextOrder)
-                .is('started_at', null)
         }
 
         return new Response(
@@ -226,6 +197,7 @@ serve(async (req) => {
                 success: true,
                 isCorrect,
                 correctAnswerIndex: question.correct_answer_index,
+                explanation: question.explanation,
                 score: {
                     basePoints,
                     timeBonus,
@@ -240,7 +212,7 @@ serve(async (req) => {
                 status: 200,
             }
         )
-    } catch (error) {
+    } catch (error: any) {
         console.error('Submit answer error:', error)
         return new Response(
             JSON.stringify({

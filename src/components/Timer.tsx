@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, memo } from 'react'
 import { getTimerColor, formatTime } from '../lib/gameLogic'
 
 interface TimerProps {
@@ -8,7 +8,7 @@ interface TimerProps {
     startTime?: number
 }
 
-export default function Timer({ duration, onTimeout, paused = false, startTime }: TimerProps) {
+function Timer({ duration, onTimeout, paused = false, startTime }: TimerProps) {
     const calcRemaining = () => {
         if (!startTime) return duration
         const elapsedSeconds = (Date.now() - startTime) / 1000
@@ -24,6 +24,7 @@ export default function Timer({ duration, onTimeout, paused = false, startTime }
     useEffect(() => {
         if (paused) return
 
+        // Reduced poll frequency to 500ms (cuts React re-render overhead by 60%)
         const interval = setInterval(() => {
             const currentRemaining = calcRemaining()
             setRemaining(currentRemaining)
@@ -31,7 +32,7 @@ export default function Timer({ duration, onTimeout, paused = false, startTime }
                 clearInterval(interval)
                 onTimeout()
             }
-        }, 200)
+        }, 500)
 
         return () => clearInterval(interval)
     }, [paused, startTime, duration, onTimeout])
@@ -63,7 +64,7 @@ export default function Timer({ duration, onTimeout, paused = false, startTime }
                     fill="none"
                     strokeDasharray={circumference}
                     strokeDashoffset={strokeDashoffset}
-                    className={`${colorClass} transition-all duration-300 ease-linear`}
+                    className={`${colorClass} transition-all duration-500 ease-linear`}
                     strokeLinecap="round"
                 />
             </svg>
@@ -75,3 +76,5 @@ export default function Timer({ duration, onTimeout, paused = false, startTime }
         </div>
     )
 }
+
+export default memo(Timer)

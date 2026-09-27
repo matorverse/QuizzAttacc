@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase, Question, MatchScore } from '../lib/supabase'
-import { loadGameState, getStreakText, getPlayerAvatar } from '../lib/gameLogic'
+import { loadGameState, getStreakText, getPlayerAvatar, decodeHtmlEntities } from '../lib/gameLogic'
 import { playClick, playCorrect, playIncorrect, playStreak, isAudioMuted, toggleAudioMute, triggerHaptic } from '../lib/audio'
 import Timer from '../components/Timer'
 import ScoreBoard from '../components/ScoreBoard'
@@ -25,6 +25,7 @@ export default function GameArena() {
     const [showFeedback, setShowFeedback] = useState(false)
     const [waitingForOpponent, setWaitingForOpponent] = useState(false)
     const [questionStartTime, setQuestionStartTime] = useState<number>(Date.now())
+    const [forfeitCountdown, setForfeitCountdown] = useState<number>(30)
 
     const [myPlayerName, setMyPlayerName] = useState('You')
     const [opponentPlayerName, setOpponentPlayerName] = useState('Opponent')
@@ -39,6 +40,7 @@ export default function GameArena() {
     const [connectionState, setConnectionState] = useState<'connected' | 'reconnecting' | 'disconnected'>('connected')
     const [muted, setMuted] = useState(isAudioMuted())
 
+    // Zero-knowledge question deck (does NOT contain correct_answer_index)
     const prefetchedQuestionsRef = useRef<Record<number, Question>>({})
     const questionOrderRef = useRef<number>(1)
     const eventsChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
@@ -57,10 +59,10 @@ export default function GameArena() {
 
         const initializeArena = async () => {
             try {
-                // Bulk-fetch all questions for the match deck to ensure 0ms load delay
+                // Zero-knowledge question retrieval: strictly omit correct_answer_index and explanation
                 const { data: mqList } = await supabase
                     .from('match_questions')
-                    .select('question_order, question_id, questions(*)')
+                    .select('question_order, question_id, questions(id, topic, difficulty, question_text, options)')
                     .eq('match_id', matchId)
                     .order('question_order', { ascending: true })
 
@@ -211,7 +213,7 @@ export default function GameArena() {
             )
             .subscribe()
 
-        // Live Realtime Broadcast Channel for Opponent Progress & Locked In Status
+        // Realtime Broadcast Channel for Live Opponent Progress
         const eventsChannel = supabase
             .channel(`match_events:${matchId}`)
             .on('broadcast', { event: 'PLAYER_ANSWERED' }, (payload) => {
@@ -227,7 +229,7 @@ export default function GameArena() {
 
         eventsChannelRef.current = eventsChannel
 
-        // Mobile visibility resume listener for auto-reconnecting WebSockets
+        // Mobile visibility resume listener
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'visible') {
                 scoreChannel.subscribe()
@@ -246,6 +248,7 @@ export default function GameArena() {
         }
     }, [matchId])
 
+    // Waiting for opponent handler with forfeit countdown
     useEffect(() => {
         if (!waitingForOpponent || !matchId) return
 
@@ -263,13 +266,27 @@ export default function GameArena() {
         }
 
         checkStatus()
-        const interval = setInterval(checkStatus, 1000) // Accelerated 1.0s polling
+        const statusInterval = setInterval(checkStatus, 2500)
+
+        // 30s countdown for forfeit option
+        const countdownInterval = setInterval(() => {
+            setForfeitCountdown((prev) => {
+                if (prev <= 1) {
+                    clearInterval(countdownInterval)
+                    return 0
+                }
+                return prev - 1
+            })
+        }, 1000)
+
         return () => {
             isSubscribed = false
-            clearInterval(interval)
+            clearInterval(statusInterval)
+            clearInterval(countdownInterval)
         }
     }, [waitingForOpponent, matchId, navigate])
 
+    // Score fallback during network blips
     useEffect(() => {
         if (!matchId || connectionState === 'connected') return
 
@@ -303,7 +320,7 @@ export default function GameArena() {
         }
 
         fetchScoresFallback()
-        const interval = setInterval(fetchScoresFallback, 1000) // Accelerated 1.0s polling fallback
+        const interval = setInterval(fetchScoresFallback, 3000)
         return () => clearInterval(interval)
     }, [matchId, connectionState, gameState])
 
@@ -312,7 +329,7 @@ export default function GameArena() {
         try {
             const { data: matchQuestion } = await supabase
                 .from('match_questions')
-                .select('question_id, questions(*)')
+                .select('question_id, questions(id, topic, difficulty, question_text, options)')
                 .eq('match_id', matchId)
                 .eq('question_order', order)
                 .single()
@@ -322,14 +339,13 @@ export default function GameArena() {
                 prefetchedQuestionsRef.current[order] = matchQuestion.questions
             }
         } catch {
-            // Background prefetch errors fail silently
+            // Background prefetch fail safe
         }
     }
 
     const loadQuestion = async (order: number) => {
         try {
             let questionToSet: Question | null = null
-            // Per-Player Isolated Start Timestamp: Always anchor start time to the current local player's load moment
             const startTimeMs = Date.now()
 
             if (prefetchedQuestionsRef.current[order]) {
@@ -337,7 +353,7 @@ export default function GameArena() {
             } else {
                 const { data: matchQuestion, error: mqError } = await supabase
                     .from('match_questions')
-                    .select('question_id, questions(*)')
+                    .select('question_id, questions(id, topic, difficulty, question_text, options)')
                     .eq('match_id', matchId!)
                     .eq('question_order', order)
                     .single()
@@ -362,7 +378,6 @@ export default function GameArena() {
             setFloatingScoreText(null)
             setLoading(false)
 
-            // Background prefetch for subsequent order
             prefetchQuestion(order + 1)
         } catch (error) {
             console.error('Error loading question:', error)
@@ -372,45 +387,14 @@ export default function GameArena() {
     const handleAnswerSelect = async (answerIndex: number) => {
         if (submitting || selectedAnswer !== null || !currentQuestion) return
 
-        const correctIndex = currentQuestion.correct_answer_index ?? 0
-        const isAnsCorrect = answerIndex === correctIndex
-
-        // INSTANT OPTIMISTIC FEEDBACK (< 10 ms)
-        triggerHaptic(isAnsCorrect ? [40, 40] : [100, 50, 100])
+        // Instant click feedback
         playClick()
-        if (isAnsCorrect) {
-            playCorrect()
-            if (myStreak >= 2) playStreak()
-        } else {
-            playIncorrect()
-        }
-
         setSelectedAnswer(answerIndex)
-        setIsCorrect(isAnsCorrect)
-        setCorrectAnswerIndex(correctIndex)
-        setShowFeedback(true)
         setSubmitting(true)
 
-        const timeTaken = Date.now() - questionStartTime
+        const timeTaken = Math.max(0, Date.now() - questionStartTime)
 
-        // Calculate local floating score text
-        if (isAnsCorrect) {
-            const timePerMs = timePerQuestion * 1000
-            const remainingRatio = Math.max(0, (timePerMs - timeTaken) / timePerMs)
-            const timeBonus = Math.floor(remainingRatio * 50)
-            let mult = 1.0
-            const newStreak = myStreak + 1
-            if (newStreak >= 3) mult = 1.3
-            else if (newStreak === 2) mult = 1.1
-
-            const totalPts = Math.floor((100 + timeBonus) * mult)
-            const streakBonusText = newStreak >= 2 ? ` • ${getStreakText(newStreak)}` : ''
-            setFloatingScoreText(`+${totalPts} PTS${streakBonusText}`)
-        } else {
-            setFloatingScoreText('✗ INCORRECT')
-        }
-
-        // Broadcast real-time answer event to opponent
+        // Broadcast to opponent that answer is locked in
         if (eventsChannelRef.current) {
             eventsChannelRef.current.send({
                 type: 'broadcast',
@@ -422,10 +406,83 @@ export default function GameArena() {
             })
         }
 
-        // Background Database Processing
-        submitAnswerInBackground(answerIndex, timeTaken)
+        // Server-authoritative answer submission & verification
+        let serverResult: any = null
 
+        // 1. Try atomic database RPC first
+        try {
+            const { data: rpcData, error: rpcErr } = await supabase.rpc('submit_player_answer', {
+                p_match_id: matchId,
+                p_player_id: gameState?.playerId,
+                p_question_id: currentQuestion.id,
+                p_selected_answer_index: answerIndex,
+                p_time_taken_ms: timeTaken,
+            })
+
+            if (!rpcErr && rpcData && rpcData.success) {
+                serverResult = rpcData
+            }
+        } catch (rpcEx) {
+            console.warn('Direct RPC submit failed, calling edge function:', rpcEx)
+        }
+
+        // 2. Fallback to Edge Function
+        if (!serverResult) {
+            try {
+                const { data: funcData, error: funcErr } = await supabase.functions.invoke('submit-answer', {
+                    body: {
+                        matchId,
+                        playerId: gameState?.playerId,
+                        questionId: currentQuestion.id,
+                        selectedAnswerIndex: answerIndex,
+                        timeTakenMs: timeTaken,
+                    },
+                })
+
+                if (!funcErr && funcData?.success) {
+                    serverResult = funcData
+                }
+            } catch (edgeEx) {
+                console.error('Edge Function submit error:', edgeEx)
+            }
+        }
+
+        const isAnsCorrect = Boolean(serverResult?.isCorrect)
+        const verifiedCorrectIndex = serverResult?.correctAnswerIndex ?? 0
+        const verifiedScore = serverResult?.score
+        const verifiedExplanation = serverResult?.explanation || currentQuestion.explanation
+
+        setIsCorrect(isAnsCorrect)
+        setCorrectAnswerIndex(verifiedCorrectIndex)
+        setShowFeedback(true)
+
+        if (isAnsCorrect) {
+            triggerHaptic([40, 40])
+            playCorrect()
+            const streak = verifiedScore?.currentStreak ?? (myStreak + 1)
+            if (streak >= 2) playStreak()
+
+            const totalPts = verifiedScore?.totalPoints ?? 100
+            const streakBonusText = streak >= 2 ? ` • ${getStreakText(streak)}` : ''
+            setFloatingScoreText(`+${totalPts} PTS${streakBonusText}`)
+        } else {
+            triggerHaptic([100, 50, 100])
+            playIncorrect()
+            setFloatingScoreText(answerIndex === -1 ? '⌛ TIME OUT' : '✗ INCORRECT')
+        }
+
+        // Update local explanation if provided
+        if (verifiedExplanation) {
+            setCurrentQuestion((prev) => prev ? { ...prev, explanation: verifiedExplanation } : null)
+        }
+
+        // Advance to next question or waiting room
         setTimeout(() => {
+            if (serverResult?.matchComplete) {
+                navigate(`/results/${matchId}`)
+                return
+            }
+
             const nextOrder = questionOrder + 1
             if (nextOrder <= totalQuestions) {
                 loadQuestion(nextOrder)
@@ -433,97 +490,27 @@ export default function GameArena() {
             } else {
                 setWaitingForOpponent(true)
             }
-        }, 2500)
-    }
-
-    const submitAnswerInBackground = async (answerIndex: number, timeTaken: number) => {
-        try {
-            const { data, error } = await supabase.functions.invoke('submit-answer', {
-                body: {
-                    matchId,
-                    playerId: gameState?.playerId,
-                    questionId: currentQuestion?.id,
-                    selectedAnswerIndex: answerIndex,
-                    timeTakenMs: timeTaken,
-                    submittedAt: new Date().toISOString(),
-                },
-            })
-
-            if (error || !data?.success) {
-                await submitAnswerDirectly(answerIndex, timeTaken)
-            }
-        } catch {
-            await submitAnswerDirectly(answerIndex, timeTaken)
-        }
-    }
-
-    const submitAnswerDirectly = async (answerIndex: number, timeTaken: number) => {
-        const correctIndex = currentQuestion?.correct_answer_index ?? 0
-        const isAnsCorrect = answerIndex === correctIndex
-
-        let basePoints = 0
-        let timeBonus = 0
-        let multiplier = 1.0
-
-        if (isAnsCorrect) {
-            basePoints = 100
-            const timePerMs = timePerQuestion * 1000
-            const remainingRatio = Math.max(0, (timePerMs - timeTaken) / timePerMs)
-            timeBonus = Math.floor(remainingRatio * 50)
-
-            const newStreak = myStreak + 1
-            if (newStreak >= 3) multiplier = 1.3
-            else if (newStreak === 2) multiplier = 1.1
-
-            const totalPts = Math.floor((basePoints + timeBonus) * multiplier)
-
-            await supabase.from('player_answers').insert({
-                match_id: matchId,
-                player_id: gameState?.playerId,
-                question_id: currentQuestion?.id,
-                selected_answer_index: answerIndex,
-                is_correct: true,
-                time_taken_ms: timeTaken,
-            })
-
-            await supabase.from('match_scores').insert({
-                match_id: matchId,
-                player_id: gameState?.playerId,
-                question_id: currentQuestion?.id,
-                base_points: basePoints,
-                time_bonus: timeBonus,
-                streak_multiplier: multiplier,
-                total_points: totalPts,
-                current_streak: newStreak,
-            })
-        } else {
-            await supabase.from('player_answers').insert({
-                match_id: matchId,
-                player_id: gameState?.playerId,
-                question_id: currentQuestion?.id,
-                selected_answer_index: answerIndex,
-                is_correct: false,
-                time_taken_ms: timeTaken,
-            })
-
-            await supabase.from('match_scores').insert({
-                match_id: matchId,
-                player_id: gameState?.playerId,
-                question_id: currentQuestion?.id,
-                base_points: 0,
-                time_bonus: 0,
-                streak_multiplier: 1.0,
-                total_points: 0,
-                current_streak: 0,
-            })
-        }
+        }, 2200)
     }
 
     const handleTimeout = useCallback(() => {
         if (selectedAnswer === null && !submitting && !waitingForOpponent) {
             handleAnswerSelect(-1)
         }
-    }, [selectedAnswer, submitting, waitingForOpponent])
+    }, [selectedAnswer, submitting, waitingForOpponent, handleAnswerSelect])
+
+    const handleClaimForfeit = async () => {
+        try {
+            setLoading(true)
+            await supabase.rpc('forfeit_match', {
+                p_match_id: matchId,
+                p_player_id: gameState?.playerId,
+            })
+            navigate(`/results/${matchId}`)
+        } catch {
+            navigate(`/results/${matchId}`)
+        }
+    }
 
     if (loading) {
         return (
@@ -555,12 +542,28 @@ export default function GameArena() {
 
                     <div className="wood-panel text-center p-8 mt-6">
                         <div className="w-14 h-14 border-4 border-gold border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
-                        <h2 className="text-3xl font-serif font-bold mb-3 text-gold-gradient">All Questions Answered!</h2>
+                        <h2 className="text-3xl font-serif font-bold mb-3 text-gold-gradient">All Scrolls Answered!</h2>
                         <p className="text-parchment-muted font-body mb-4">
-                            You've answered all question scrolls. Waiting for <span className="text-gold-light font-serif font-bold">{opponentPlayerName}</span> to finish...
+                            You've finished your questions. Waiting for <span className="text-gold-light font-serif font-bold">{opponentPlayerName}</span> to conclude...
                         </p>
-                        <div className="bg-wood-darker p-4 rounded-xl text-xs font-serif text-gold border border-gold/30">
-                            📜 Live scores update in real-time. You will be redirected to victory results automatically!
+                        
+                        <div className="bg-wood-darker p-4 rounded-xl text-xs font-serif text-gold border border-gold/30 mb-6">
+                            📜 Live scores update in real-time. Redirecting to victory results automatically!
+                        </div>
+
+                        {/* Forfeit and Emergency Exit Controls */}
+                        <div className="pt-4 border-t border-gold/20 flex flex-col items-center gap-3">
+                            <p className="text-xs font-serif text-parchment-muted">
+                                {forfeitCountdown > 0
+                                    ? `Opponent grace period: ${forfeitCountdown}s remaining`
+                                    : 'Opponent inactive. You may conclude the match now.'}
+                            </p>
+                            <button
+                                onClick={handleClaimForfeit}
+                                className="btn-primary text-xs py-2 px-4 flex items-center gap-2"
+                            >
+                                ⚡ Conclude Duel & View Results
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -603,7 +606,7 @@ export default function GameArena() {
                     </div>
                 </div>
 
-                {/* 10-Step Progress Scrollbar */}
+                {/* Step Progress Pin Track */}
                 <BattleProgressBar
                     totalQuestions={totalQuestions}
                     currentQuestionOrder={questionOrder}
@@ -653,7 +656,7 @@ export default function GameArena() {
                         {currentQuestion.topic} • {currentQuestion.difficulty}
                     </div>
                     <h2 className="text-lg sm:text-2xl md:text-3xl font-serif font-bold mb-4 sm:mb-8 text-center text-parchment-text leading-snug">
-                        {currentQuestion.question_text}
+                        {decodeHtmlEntities(currentQuestion.question_text)}
                     </h2>
 
                     {/* Wooden Option Tile Buttons */}
@@ -685,7 +688,9 @@ export default function GameArena() {
                                         <div className="w-8 h-8 rounded-lg bg-wood-medium border border-gold/40 text-gold flex items-center justify-center font-serif font-bold text-sm flex-shrink-0 shadow-sm">
                                             {String.fromCharCode(65 + index)}
                                         </div>
-                                        <div className="flex-1 text-left font-body text-sm sm:text-base">{option}</div>
+                                        <div className="flex-1 text-left font-body text-sm sm:text-base">
+                                            {decodeHtmlEntities(option)}
+                                        </div>
                                         {showFeedback && isThisCorrect && <span className="text-forest font-bold text-base">✓</span>}
                                         {showFeedback && isThisWrong && <span className="text-burgundy font-bold text-base">✗</span>}
                                     </div>
@@ -708,14 +713,16 @@ export default function GameArena() {
                                     {isCorrect ? '✓ Excellent! Correct Answer.' : '✗ Incorrect Choice'}
                                 </div>
                                 {currentQuestion.explanation && (
-                                    <div className="text-xs font-body text-parchment-muted leading-relaxed">{currentQuestion.explanation}</div>
+                                    <div className="text-xs font-body text-parchment-muted leading-relaxed">
+                                        {decodeHtmlEntities(currentQuestion.explanation)}
+                                    </div>
                                 )}
                             </div>
                         </div>
                     )}
                 </div>
 
-                {/* Streak indicator */}
+                {/* Streak multiplier indicator */}
                 {myStreak > 0 && !showFeedback && (
                     <div className="text-center font-serif text-gold font-bold animate-pulse text-sm">
                         🪙 {getStreakText(myStreak)} Streak Multiplier Active!

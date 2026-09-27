@@ -11,6 +11,8 @@ function decodeEntities(text: string) {
     return text
         .replace(/&quot;/g, '"')
         .replace(/&#039;/g, "'")
+        .replace(/&#39;/g, "'")
+        .replace(/&#x27;/g, "'")
         .replace(/&apos;/g, "'")
         .replace(/&amp;/g, '&')
         .replace(/&lt;/g, '<')
@@ -22,6 +24,17 @@ function decodeEntities(text: string) {
         .replace(/&ntilde;/g, 'ñ')
         .replace(/&oacute;/g, 'ó')
         .replace(/&uuml;/g, 'ü')
+        .replace(/&ouml;/g, 'ö')
+        .replace(/&auml;/g, 'ä')
+        .replace(/&shy;/g, '')
+        .replace(/&hellip;/g, '…')
+        .replace(/&rsquo;/g, "'")
+        .replace(/&lsquo;/g, "'")
+        .replace(/&rdquo;/g, '"')
+        .replace(/&ldquo;/g, '"')
+        .replace(/&ndash;/g, '–')
+        .replace(/&mdash;/g, '—')
+        .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(dec))
 }
 
 const OPENTDB_CATEGORY_IDS: Record<string, number> = {
@@ -104,7 +117,16 @@ serve(async (req) => {
 
         const normalizedCode = roomCode.toUpperCase()
 
-        const { data: { user } } = await supabaseClient.auth.getUser()
+        // Resolve Auth User from Bearer token
+        const authHeader = req.headers.get('Authorization')
+        let user = null
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            const token = authHeader.replace('Bearer ', '').trim()
+            if (token) {
+                const { data: userData } = await supabaseClient.auth.getUser(token)
+                user = userData?.user || null
+            }
+        }
 
         let playerId: string
 
@@ -113,7 +135,7 @@ serve(async (req) => {
                 .from('players')
                 .select('id')
                 .eq('auth_id', user.id)
-                .single()
+                .maybeSingle()
 
             if (existingPlayer) {
                 playerId = existingPlayer.id
@@ -125,7 +147,7 @@ serve(async (req) => {
                 const { data: newPlayer, error: playerError } = await supabaseClient
                     .from('players')
                     .insert({ display_name: displayName, auth_id: user.id })
-                    .select()
+                    .select('id')
                     .single()
 
                 if (playerError) throw playerError
@@ -135,7 +157,7 @@ serve(async (req) => {
             const { data: newPlayer, error: playerError } = await supabaseClient
                 .from('players')
                 .insert({ display_name: displayName })
-                .select()
+                .select('id')
                 .single()
 
             if (playerError) throw playerError
@@ -178,20 +200,38 @@ serve(async (req) => {
             throw new Error('You are already in this room as host')
         }
 
-        const { data: updatedMatch, error: updateError } = await supabaseClient
+        // Try atomic Stored Procedure first
+        try {
+            const { data: rpcRes, error: rpcErr } = await supabaseClient.rpc('join_and_setup_match', {
+                p_match_id: match.id,
+                p_player2_id: playerId,
+            })
+            if (!rpcErr && rpcRes && rpcRes.success) {
+                return new Response(
+                    JSON.stringify(rpcRes),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 200,
+                    }
+                )
+            }
+        } catch (rpcEx) {
+            console.warn('RPC join_and_setup_match unavailable, using manual assignment:', rpcEx)
+        }
+
+        const { error: updateError } = await supabaseClient
             .from('matches')
             .update({
                 player2_id: playerId,
                 status: 'active',
                 started_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
             })
             .eq('id', match.id)
-            .select()
-            .single()
 
         if (updateError) throw updateError
 
-        // Resolve Question Pool with multi-tier fallback + OpenTDB dynamic fetch
+        // Resolve Question Pool with multi-tier fallback
         const { data: exactQuestions } = await supabaseClient
             .from('questions')
             .select('id')
@@ -200,17 +240,6 @@ serve(async (req) => {
 
         let pool = exactQuestions || []
 
-        // Dynamic OpenTDB Fetch if exact match is insufficient
-        if (pool.length < room.question_count) {
-            const fetched = await fetchAndSaveOpenTDBQuestions(supabaseClient, room.topic, room.difficulty, 15)
-            if (fetched && fetched.length > 0) {
-                const existingIds = new Set(pool.map((q) => q.id))
-                const newItems = fetched.filter((q: any) => !existingIds.has(q.id))
-                pool = [...pool, ...newItems]
-            }
-        }
-
-        // Fallback 2: Same topic
         if (pool.length < room.question_count) {
             const { data: topicQuestions } = await supabaseClient
                 .from('questions')
@@ -224,7 +253,6 @@ serve(async (req) => {
             }
         }
 
-        // Fallback 3: Any question in database
         if (pool.length < room.question_count) {
             const { data: allQuestions } = await supabaseClient
                 .from('questions')
@@ -234,6 +262,16 @@ serve(async (req) => {
                 const existingIds = new Set(pool.map((q) => q.id))
                 const extraQuestions = allQuestions.filter((q) => !existingIds.has(q.id))
                 pool = [...pool, ...extraQuestions]
+            }
+        }
+
+        if (pool.length < room.question_count) {
+            // As a last resort, dynamically fetch from OpenTDB
+            const fetched = await fetchAndSaveOpenTDBQuestions(supabaseClient, room.topic, room.difficulty, 15)
+            if (fetched && fetched.length > 0) {
+                const existingIds = new Set(pool.map((q) => q.id))
+                const newItems = fetched.filter((q: any) => !existingIds.has(q.id))
+                pool = [...pool, ...newItems]
             }
         }
 
@@ -263,14 +301,6 @@ serve(async (req) => {
 
         if (insertQuestionsError) throw insertQuestionsError
 
-        const { data: firstQuestion, error: firstQuestionError } = await supabaseClient
-            .from('questions')
-            .select('*')
-            .eq('id', selectedQuestions[0].id)
-            .single()
-
-        if (firstQuestionError) throw firstQuestionError
-
         const { data: player1Data } = await supabaseClient
             .from('players')
             .select('id, display_name')
@@ -292,7 +322,6 @@ serve(async (req) => {
                     questionCount: room.question_count,
                     timePerQuestion: room.time_per_question,
                 },
-                firstQuestion: firstQuestion,
             }),
             {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },

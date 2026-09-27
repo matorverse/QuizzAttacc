@@ -1,4 +1,5 @@
 // Web Audio API Synthesizer module for QuizzAttacc tavern sound cues
+// Implements leak-free oscillator node recycling and robust browser audio unlock
 
 let audioCtx: AudioContext | null = null
 
@@ -14,6 +15,21 @@ function getAudioContext(): AudioContext | null {
         audioCtx.resume().catch(() => {})
     }
     return audioCtx
+}
+
+// User gesture unlock listener
+if (typeof window !== 'undefined') {
+    const unlockAudio = () => {
+        if (audioCtx && audioCtx.state === 'suspended') {
+            audioCtx.resume().catch(() => {})
+        }
+        window.removeEventListener('click', unlockAudio)
+        window.removeEventListener('keydown', unlockAudio)
+        window.removeEventListener('touchstart', unlockAudio)
+    }
+    window.addEventListener('click', unlockAudio, { passive: true })
+    window.addEventListener('keydown', unlockAudio, { passive: true })
+    window.addEventListener('touchstart', unlockAudio, { passive: true })
 }
 
 let muted = typeof localStorage !== 'undefined' ? localStorage.getItem('quizexe_muted') === 'true' : false
@@ -45,14 +61,18 @@ export const playClick = () => {
 
         osc.connect(gain)
         gain.connect(ctx.destination)
+
         osc.onended = () => {
-            osc.disconnect()
-            gain.disconnect()
+            try {
+                osc.disconnect()
+                gain.disconnect()
+            } catch {}
         }
+
         osc.start()
         osc.stop(ctx.currentTime + 0.05)
     } catch {
-        // Audio playback error fallback
+        // Audio playback fallback
     }
 }
 
@@ -77,6 +97,14 @@ export const playCorrect = () => {
 
             osc.connect(gain)
             gain.connect(ctx.destination)
+
+            osc.onended = () => {
+                try {
+                    osc.disconnect()
+                    gain.disconnect()
+                } catch {}
+            }
+
             osc.start(now + i * 0.08)
             osc.stop(now + i * 0.08 + 0.4)
         })
@@ -104,6 +132,14 @@ export const playIncorrect = () => {
 
         osc.connect(gain)
         gain.connect(ctx.destination)
+
+        osc.onended = () => {
+            try {
+                osc.disconnect()
+                gain.disconnect()
+            } catch {}
+        }
+
         osc.start(now)
         osc.stop(now + 0.25)
     } catch {
@@ -132,6 +168,14 @@ export const playStreak = () => {
 
             osc.connect(gain)
             gain.connect(ctx.destination)
+
+            osc.onended = () => {
+                try {
+                    osc.disconnect()
+                    gain.disconnect()
+                } catch {}
+            }
+
             osc.start(now + i * 0.06)
             osc.stop(now + i * 0.06 + 0.5)
         })
@@ -161,6 +205,14 @@ export const playVictory = () => {
 
             osc.connect(gain)
             gain.connect(ctx.destination)
+
+            osc.onended = () => {
+                try {
+                    osc.disconnect()
+                    gain.disconnect()
+                } catch {}
+            }
+
             osc.start(now + i * 0.1)
             osc.stop(now + i * 0.1 + 0.8)
         })
@@ -180,7 +232,7 @@ export const playEmergencyTick = () => {
         const gain = ctx.createGain()
 
         osc.type = 'sine'
-        osc.frequency.setValueAtTime(880, now) // High pitch A5 urgency
+        osc.frequency.setValueAtTime(880, now)
         osc.frequency.exponentialRampToValueAtTime(440, now + 0.04)
 
         gain.gain.setValueAtTime(0.2, now)
@@ -188,6 +240,14 @@ export const playEmergencyTick = () => {
 
         osc.connect(gain)
         gain.connect(ctx.destination)
+
+        osc.onended = () => {
+            try {
+                osc.disconnect()
+                gain.disconnect()
+            } catch {}
+        }
+
         osc.start(now)
         osc.stop(now + 0.04)
     } catch {

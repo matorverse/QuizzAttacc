@@ -37,45 +37,49 @@ serve(async (req) => {
       throw new Error('Time per question must be 10, 15, 20, or 30 seconds')
     }
 
-    // Get or create player
-    const { data: { user } } = await supabaseClient.auth.getUser()
-    
+    // Resolve Auth User from request Authorization Bearer header
+    const authHeader = req.headers.get('Authorization')
+    let user = null
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.replace('Bearer ', '').trim()
+      if (token) {
+        const { data: userData } = await supabaseClient.auth.getUser(token)
+        user = userData?.user || null
+      }
+    }
+
     let playerId: string
-    
-    // Check if player already exists for this auth user
+
     if (user) {
       const { data: existingPlayer } = await supabaseClient
         .from('players')
         .select('id')
         .eq('auth_id', user.id)
-        .single()
-      
+        .maybeSingle()
+
       if (existingPlayer) {
         playerId = existingPlayer.id
-        // Update display name
         await supabaseClient
           .from('players')
           .update({ display_name: displayName })
           .eq('id', playerId)
       } else {
-        // Create new player
         const { data: newPlayer, error: playerError } = await supabaseClient
           .from('players')
           .insert({ display_name: displayName, auth_id: user.id })
-          .select()
+          .select('id')
           .single()
-        
+
         if (playerError) throw playerError
         playerId = newPlayer.id
       }
     } else {
-      // Anonymous user - create player without auth_id
       const { data: newPlayer, error: playerError } = await supabaseClient
         .from('players')
         .insert({ display_name: displayName })
-        .select()
+        .select('id')
         .single()
-      
+
       if (playerError) throw playerError
       playerId = newPlayer.id
     }
@@ -87,15 +91,15 @@ serve(async (req) => {
       .select('id')
       .eq('host_id', playerId)
       .gte('created_at', oneHourAgo)
-    
+
     if (rateLimitError) throw rateLimitError
-    
-    if (recentRooms && recentRooms.length >= 5) {
-      throw new Error('Rate limit exceeded: Maximum 5 rooms per hour')
+
+    if (recentRooms && recentRooms.length >= 10) {
+      throw new Error('Rate limit exceeded: Maximum 10 rooms hosted per hour')
     }
 
     // Generate unique 6-character room code
-    let roomCode: string
+    let roomCode = ''
     let codeExists = true
     let attempts = 0
     const maxAttempts = 10
@@ -106,13 +110,13 @@ serve(async (req) => {
         .from('rooms')
         .select('id')
         .eq('code', roomCode)
-        .single()
-      
+        .maybeSingle()
+
       codeExists = !!existingRoom
       attempts++
     }
 
-    if (codeExists) {
+    if (codeExists || !roomCode) {
       throw new Error('Failed to generate unique room code')
     }
 
@@ -120,14 +124,14 @@ serve(async (req) => {
     const { data: room, error: roomError } = await supabaseClient
       .from('rooms')
       .insert({
-        code: roomCode!,
+        code: roomCode,
         host_id: playerId,
         topic,
         difficulty,
         question_count: questionCount,
         time_per_question: timePerQuestion,
       })
-      .select()
+      .select('*')
       .single()
 
     if (roomError) throw roomError
@@ -140,7 +144,7 @@ serve(async (req) => {
         player1_id: playerId,
         status: 'waiting',
       })
-      .select()
+      .select('*')
       .single()
 
     if (matchError) throw matchError
@@ -163,7 +167,7 @@ serve(async (req) => {
         status: 200,
       }
     )
-  } catch (error) {
+  } catch (error: any) {
     return new Response(
       JSON.stringify({
         success: false,
@@ -178,7 +182,7 @@ serve(async (req) => {
 })
 
 function generateRoomCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // Removed ambiguous chars
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
   let code = ''
   for (let i = 0; i < 6; i++) {
     code += chars.charAt(Math.floor(Math.random() * chars.length))
